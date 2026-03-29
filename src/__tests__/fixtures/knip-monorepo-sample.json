@@ -1,0 +1,68 @@
+{
+  "issues": [
+    {
+      "file": "apps/web/unused.ts",
+      "binaries": [],
+      "catalog": [],
+      "dependencies": [],
+      "devDependencies": [],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [{ "name": "apps/web/unused.ts" }],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    },
+    {
+      "file": "packages/ui/pkg.ts",
+      "binaries": [],
+      "catalog": [],
+      "dependencies": [],
+      "devDependencies": [],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [{ "name": "packages/ui/pkg.ts" }],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    },
+    {
+      "file": "apps/web/package.json",
+      "binaries": [],
+      "catalog": [],
+      "dependencies": [{ "name": "lodash", "line": 10, "col": 1, "pos": 100 }],
+      "devDependencies": [{ "name": "tsx", "line": 11, "col": 1, "pos": 120 }],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    },
+    {
+      "file": "packages/ui/package.json",
+      "binaries": [],
+      "catalog": [],
+      "dependencies": [{ "name": "date-fns", "line": 51, "col": 6, "pos": 1630 }],
+      "devDependencies": [],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    }
+  ]
+}
