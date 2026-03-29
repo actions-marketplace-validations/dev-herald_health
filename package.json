@@ -1,5 +1,5 @@
 {
-  "name": "health-ingest-action",
+  "name": "@dev-herald/health",
   "version": "0.1.0",
   "description": "GitHub Action: Knip JSON → Dev Herald health ingest API",
   "main": "build/index.js",

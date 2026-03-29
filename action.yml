@@ -1,33 +1,42 @@
-name: 'Health ingest - Dev Herald'
-description: 'Upload Knip JSON results to Dev Herald health ingest API'
+name: 'Code Health - Dev Herald'
+description: 'Send CI health data to Dev Herald to power codebase health reports'
 branding:
   icon: 'activity'
   color: 'green'
+
 inputs:
   api-key:
-    description: 'Dev Herald project API key (Bearer token)'
+    description: 'Dev Herald project API key'
     required: true
-  knip-report-path:
-    description: 'Path to a single Knip JSON file (e.g. pnpm exec knip --reporter json --no-exit-code > results.json)'
+
+  report-path:
+    description: 'Path to a health report file (JSON)'
     required: true
+
   api-url:
-    description: 'Full URL to the health ingest endpoint'
+    description: 'Dev Herald ingest API endpoint'
     required: false
     default: 'https://dev-herald.com/api/v1/health/ingest'
+
   repository-full-name:
-    description: 'owner/repo (default from github.context)'
+    description: 'owner/repo (defaults to GitHub context)'
     required: false
+
   commit-sha:
-    description: 'Commit SHA (default from github.context)'
+    description: 'Commit SHA (defaults to GitHub context)'
     required: false
+
   workflow-run-url:
-    description: 'Link to the workflow run (optional). Suggested default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+    description: 'Link to the workflow run'
     required: false
+
 outputs:
   report-id:
-    description: 'Dev Herald health report id'
+    description: 'Health report ID'
+
   status:
     description: 'created or failed'
+
 runs:
   using: 'node20'
   main: 'build/index.js'

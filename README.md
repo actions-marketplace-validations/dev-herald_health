@@ -10,7 +10,8 @@ Dev Herald ingests structured data from your workflows (unused code, dependencie
 
 CI already knows a lot about your codebase - it just doesn’t communicate it well.
 
-Dev Herald helps you:
+[Dev Herald](https://dev-herald.com) helps you:
+
 - Track **unused code & dependencies**
 - Monitor **bundle size changes over time**
 - Surface **dependency risks (CVEs)**
@@ -22,7 +23,7 @@ All from the workflows you already run.
 
 ## Usage
 
-Create a project API key from https://dev-herald.com and store it as a secret:
+Create a project API key from [Dev Herald](https://dev-herald.com) and store it as a secret:
 
 ```yaml
 DEV_HERALD_KEY=your-api-key
@@ -68,3 +69,10 @@ Knip is just one example - Dev Herald is designed to support multiple signals ov
 | `repository-full-name` | Optional override |
 | `commit-sha` | Optional override |
 | `workflow-run-url` | Link to CI run |
+
+### Outputs
+
+| Output | Description |
+| ------ | ----------- |
+| `report-id` | Dev Herald health report id |
+| `status` | created or failed |
