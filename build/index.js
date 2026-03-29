@@ -30089,9 +30089,7 @@ const github = __importStar(__nccwpck_require__(4903));
 const api_1 = __nccwpck_require__(7822);
 const build_payload_1 = __nccwpck_require__(1777);
 const inputs_1 = __nccwpck_require__(5599);
-const knip_merge_1 = __nccwpck_require__(1915);
 const knip_1 = __nccwpck_require__(3770);
-const multiline_paths_1 = __nccwpck_require__(3920);
 const read_knip_files_1 = __nccwpck_require__(6723);
 const DEFAULT_API_URL = 'https://dev-herald.com/api/v1/health/ingest';
 function optionalString(v) {
@@ -30101,8 +30099,7 @@ function optionalString(v) {
 async function run() {
     try {
         const apiKey = core.getInput('api-key', { required: true });
-        const knipReportPath = core.getInput('knip-report-path');
-        const knipReportPathsRaw = core.getInput('knip-report-paths');
+        const knipReportPath = core.getInput('knip-report-path', { required: true });
         const apiUrl = optionalString(core.getInput('api-url')) ?? DEFAULT_API_URL;
         const ctx = github.context;
         const repositoryFullName = optionalString(core.getInput('repository-full-name')) ??
@@ -30112,8 +30109,7 @@ async function run() {
         const workflowRunUrl = optionalString(core.getInput('workflow-run-url'));
         const inputsParsed = inputs_1.actionInputsSchema.safeParse({
             apiKey,
-            knipReportPath: knipReportPath || undefined,
-            knipReportPathsRaw: knipReportPathsRaw || undefined,
+            knipReportPath,
             apiUrl,
             repositoryFullName,
             commitSha,
@@ -30124,13 +30120,8 @@ async function run() {
             throw new Error(msg);
         }
         const v = inputsParsed.data;
-        const single = (v.knipReportPath ?? '').trim();
-        const multiPaths = (0, multiline_paths_1.pathsFromMultiline)(v.knipReportPathsRaw ?? '');
-        const reports = single.length > 0
-            ? [(0, read_knip_files_1.readAndValidateKnipReport)(single)]
-            : multiPaths.map((p) => (0, read_knip_files_1.readAndValidateKnipReport)(p));
-        const merged = (0, knip_merge_1.mergeKnipReports)(reports);
-        const knipAgg = (0, knip_1.mapKnipReportToSignals)(merged);
+        const knipReport = (0, read_knip_files_1.readAndValidateKnipReport)(v.knipReportPath);
+        const knipAgg = (0, knip_1.mapKnipReportToSignals)(knipReport);
         const payload = (0, build_payload_1.buildHealthIngestPayload)({
             knip: knipAgg,
             repositoryFullName: v.repositoryFullName,
@@ -30178,23 +30169,6 @@ async function run() {
     }
 }
 void run();
-
-
-/***/ }),
-
-/***/ 3920:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.pathsFromMultiline = pathsFromMultiline;
-function pathsFromMultiline(raw) {
-    return raw
-        .split(/\r?\n/)
-        .map((l) => l.replace(/^\s*-\s*/, '').trim())
-        .filter((l) => l.length > 0);
-}
 
 
 /***/ }),
@@ -30312,13 +30286,13 @@ exports.healthIngestRequestSchema = zod_1.z
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.actionInputsSchema = void 0;
 const zod_1 = __nccwpck_require__(7151);
-const multiline_paths_1 = __nccwpck_require__(3920);
 const nonEmpty = zod_1.z.string().min(1);
-exports.actionInputsSchema = zod_1.z
-    .object({
+exports.actionInputsSchema = zod_1.z.object({
     apiKey: nonEmpty,
-    knipReportPath: zod_1.z.string().optional(),
-    knipReportPathsRaw: zod_1.z.string().optional(),
+    knipReportPath: zod_1.z
+        .string()
+        .transform((s) => s.trim())
+        .pipe(zod_1.z.string().min(1, 'Provide knip-report-path')),
     apiUrl: zod_1.z
         .string()
         .min(1)
@@ -30327,26 +30301,6 @@ exports.actionInputsSchema = zod_1.z
     repositoryFullName: zod_1.z.string().optional(),
     commitSha: zod_1.z.string().optional(),
     workflowRunUrl: zod_1.z.string().optional(),
-})
-    .superRefine((data, ctx) => {
-    const single = data.knipReportPath?.trim() ?? '';
-    const multi = (0, multiline_paths_1.pathsFromMultiline)(data.knipReportPathsRaw ?? '');
-    const hasSingle = single.length > 0;
-    const hasMulti = multi.length > 0;
-    if (hasSingle && hasMulti) {
-        ctx.addIssue({
-            code: 'custom',
-            message: 'Provide exactly one of knip-report-path or knip-report-paths, not both.',
-            path: ['knipReportPath'],
-        });
-    }
-    else if (!hasSingle && !hasMulti) {
-        ctx.addIssue({
-            code: 'custom',
-            message: 'Provide knip-report-path (single file) or knip-report-paths (one path per line).',
-            path: ['knipReportPath'],
-        });
-    }
 });
 
 
@@ -30375,32 +30329,6 @@ exports.knipReportSchema = zod_1.z
     files: zod_1.z.array(zod_1.z.string()).optional(),
 })
     .passthrough();
-
-
-/***/ }),
-
-/***/ 1915:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.mergeKnipReports = mergeKnipReports;
-function mergeKnipReports(reports) {
-    if (reports.length === 0) {
-        return { issues: [] };
-    }
-    if (reports.length === 1) {
-        return reports[0];
-    }
-    const issues = reports.flatMap((r) => r.issues);
-    const merged = { issues };
-    const allTopFiles = reports.flatMap((r) => (Array.isArray(r.files) ? r.files : []));
-    if (allTopFiles.length > 0) {
-        merged.files = [...new Set(allTopFiles)];
-    }
-    return merged;
-}
 
 
 /***/ }),

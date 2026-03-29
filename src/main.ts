@@ -3,11 +3,8 @@ import * as github from '@actions/github';
 import { buildHeaders, makeHttpRequest } from './api';
 import { buildHealthIngestPayload } from './build-payload';
 import { actionInputsSchema } from './schemas/inputs';
-import { mergeKnipReports } from './signals/knip-merge';
 import { mapKnipReportToSignals } from './signals/knip';
-import { pathsFromMultiline } from './multiline-paths';
 import { readAndValidateKnipReport } from './read-knip-files';
-import type { KnipReport } from './schemas/knip-report';
 import type { IngestSuccessData } from './types';
 
 const DEFAULT_API_URL = 'https://dev-herald.com/api/v1/health/ingest';
@@ -20,8 +17,7 @@ function optionalString(v: string): string | undefined {
 async function run(): Promise<void> {
   try {
     const apiKey = core.getInput('api-key', { required: true });
-    const knipReportPath = core.getInput('knip-report-path');
-    const knipReportPathsRaw = core.getInput('knip-report-paths');
+    const knipReportPath = core.getInput('knip-report-path', { required: true });
     const apiUrl = optionalString(core.getInput('api-url')) ?? DEFAULT_API_URL;
 
     const ctx = github.context;
@@ -35,8 +31,7 @@ async function run(): Promise<void> {
 
     const inputsParsed = actionInputsSchema.safeParse({
       apiKey,
-      knipReportPath: knipReportPath || undefined,
-      knipReportPathsRaw: knipReportPathsRaw || undefined,
+      knipReportPath,
       apiUrl,
       repositoryFullName,
       commitSha,
@@ -49,16 +44,8 @@ async function run(): Promise<void> {
     }
 
     const v = inputsParsed.data;
-    const single = (v.knipReportPath ?? '').trim();
-    const multiPaths = pathsFromMultiline(v.knipReportPathsRaw ?? '');
-
-    const reports: KnipReport[] =
-      single.length > 0
-        ? [readAndValidateKnipReport(single)]
-        : multiPaths.map((p) => readAndValidateKnipReport(p));
-
-    const merged = mergeKnipReports(reports);
-    const knipAgg = mapKnipReportToSignals(merged);
+    const knipReport = readAndValidateKnipReport(v.knipReportPath);
+    const knipAgg = mapKnipReportToSignals(knipReport);
 
     const payload = buildHealthIngestPayload({
       knip: knipAgg,

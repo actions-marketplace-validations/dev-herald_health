@@ -3,7 +3,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { knipReportSchema } from '../schemas/knip-report';
 import { mapKnipReportToSignals } from '../signals/knip';
-import { mergeKnipReports } from '../signals/knip-merge';
 
 describe('mapKnipReportToSignals', () => {
   it('counts distinct unused files and sums deps from fixture', () => {
@@ -70,27 +69,5 @@ describe('mapKnipReportToSignals', () => {
     const agg = mapKnipReportToSignals(report);
     expect(agg.unusedFiles).toBe(0);
     expect(agg.unusedDependencies).toBe(0);
-  });
-});
-
-describe('mergeKnipReports', () => {
-  it('concatenates issues', () => {
-    const a = knipReportSchema.parse({
-      issues: [{ file: 'a.ts', files: [{ name: 'a.ts' }] }],
-    });
-    const b = knipReportSchema.parse({
-      issues: [{ file: 'b.ts', files: [{ name: 'b.ts' }] }],
-    });
-    const merged = mergeKnipReports([a, b]);
-    expect(merged.issues).toHaveLength(2);
-    const agg = mapKnipReportToSignals(merged);
-    expect(agg.unusedFiles).toBe(2);
-  });
-
-  it('dedupes top-level files when merging', () => {
-    const a = knipReportSchema.parse({ issues: [], files: ['shared.ts'] });
-    const b = knipReportSchema.parse({ issues: [], files: ['shared.ts', 'other.ts'] });
-    const merged = mergeKnipReports([a, b]);
-    expect(merged.files).toEqual(['shared.ts', 'other.ts']);
   });
 });

@@ -7,7 +7,7 @@ const base = {
 };
 
 describe('actionInputsSchema', () => {
-  it('accepts single knip path only', () => {
+  it('accepts knip path', () => {
     const r = actionInputsSchema.safeParse({
       ...base,
       knipReportPath: 'knip.json',
@@ -15,26 +15,29 @@ describe('actionInputsSchema', () => {
     expect(r.success).toBe(true);
   });
 
-  it('accepts multiline knip paths only', () => {
+  it('trims knip path', () => {
     const r = actionInputsSchema.safeParse({
       ...base,
-      knipReportPathsRaw: 'a.json\nb.json',
+      knipReportPath: '  knip.json  ',
     });
     expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.knipReportPath).toBe('knip.json');
+    }
   });
 
-  it('rejects both single and multi', () => {
+  it('rejects empty knip path', () => {
     const r = actionInputsSchema.safeParse({
       ...base,
-      knipReportPath: 'x.json',
-      knipReportPathsRaw: 'a.json',
+      knipReportPath: '',
     });
     expect(r.success).toBe(false);
   });
 
-  it('rejects neither', () => {
+  it('rejects whitespace-only knip path', () => {
     const r = actionInputsSchema.safeParse({
       ...base,
+      knipReportPath: '   ',
     });
     expect(r.success).toBe(false);
   });

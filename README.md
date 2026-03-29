@@ -1,22 +1,39 @@
-# Health ingest — Dev Herald GitHub Action
+# Health reports - Dev Herald GitHub Action
 
-Upload [Knip](https://knip.dev) JSON to the Dev Herald health ingest API (`POST /api/v1/health/ingest`). Generate the report with `pnpm exec knip --reporter json --no-exit-code > results.json` (use `--no-exit-code` so the workflow can still upload when Knip reports issues).
+Turn your CI signals into **weekly health reports** for your codebase.
 
-The compiled bundle lives in `build/` and is **committed** so consumers can use tagged versions without building locally.
+Dev Herald ingests structured data from your workflows (unused code, dependencies, bundle size changes, etc.) and turns it into **clear, trackable insights** - no dashboards to wire up, no scripts to maintain.
+
+---
+
+## Why this exists
+
+CI already knows a lot about your codebase - it just doesn’t communicate it well.
+
+Dev Herald helps you:
+- Track **unused code & dependencies**
+- Monitor **bundle size changes over time**
+- Surface **dependency risks (CVEs)**
+- Build a **history of codebase health**, not just point-in-time logs
+
+All from the workflows you already run.
+
+---
 
 ## Usage
 
-Create a [project API key](https://dev-herald.com) and store it as a secret (for example `DEV_HERALD_KEY`).
-
-Pin workflows with **`uses: dev-herald/health@v1`** (major-line tag), not semver patch tags like `@v0.1.0`.
-
-### Run Knip and upload
+Create a project API key from https://dev-herald.com and store it as a secret:
 
 ```yaml
-- name: Run Knip
-  run: pnpm exec knip --reporter json --no-exit-code > results.json
+DEV_HERALD_KEY=your-api-key
+```
 
-- name: Upload to Dev Herald
+Then upload any health data from your CI.
+
+Example - Upload a report
+
+```yaml
+- name: Upload health data
   uses: dev-herald/health@v1
   with:
     api-key: ${{ secrets.DEV_HERALD_KEY }}
@@ -24,46 +41,30 @@ Pin workflows with **`uses: dev-herald/health@v1`** (major-line tag), not semver
     workflow-run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 ```
 
-In a monorepo, pass `--workspace <path>` for each package you want included (before `--reporter json`), for example: `pnpm exec knip --workspace apps/web --workspace packages/ui --reporter json --no-exit-code > results.json`.
 
-### Multiple report files
+Example - Generating data (Knip)
 
-Use **exactly one** of `knip-report-path` or `knip-report-paths` (not both). For several JSON files, use one path per line (optional `-` list prefix is stripped):
+You can use tools like Knip to generate signals:
 
-```yaml
-- uses: dev-herald/health@v1
-  with:
-    api-key: ${{ secrets.DEV_HERALD_KEY }}
-    knip-report-paths: |
-      apps/web/knip.json
-      packages/ui/knip.json
+```yml
+- name: Run Knip
+  run: pnpm exec knip --reporter json --no-exit-code > results.json
 ```
 
-`repository-full-name` and `commit-sha` default from `github.context` when omitted.
 
-## Development
+Then upload the result using the action above.
 
-```bash
-pnpm install
-pnpm test
-pnpm run package   # typecheck + ncc → build/
-```
+Knip is just one example - Dev Herald is designed to support multiple signals over time.
 
-## Inputs
+---
+
+### Inputs
 
 | Input | Description |
 | ----- | ----------- |
-| `api-key` | Required. Bearer token (project API key). |
-| `knip-report-path` | Single Knip JSON file. |
-| `knip-report-paths` | Newline-separated paths; reports are merged before upload. |
-| `api-url` | Default `https://dev-herald.com/api/v1/health/ingest`. |
-| `repository-full-name` | Optional `owner/repo`. |
-| `commit-sha` | Optional commit SHA. |
-| `workflow-run-url` | Optional link to the workflow run. |
-
-## Outputs
-
-| Output | Description |
-| ------ | ----------- |
-| `report-id` | Ingested health report id when successful. |
-| `status` | `created` or `failed`. |
+| `api-key` | Required. Project API key |
+| `knip-report-path` | Path to a single report file |
+| `api-url` | Defaults to Dev Herald ingest API |
+| `repository-full-name` | Optional override |
+| `commit-sha` | Optional override |
+| `workflow-run-url` | Link to CI run |
