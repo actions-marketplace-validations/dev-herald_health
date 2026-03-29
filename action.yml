@@ -9,8 +9,8 @@ inputs:
     description: 'Dev Herald project API key'
     required: true
 
-  report-path:
-    description: 'Path to a health report file (JSON)'
+  knip-report-path:
+    description: 'Path to a Knip JSON report file'
     required: true
 
   api-url:
