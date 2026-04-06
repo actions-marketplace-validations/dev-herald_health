@@ -8,10 +8,39 @@ const emptyUnusedCode = {
 };
 
 describe('healthIngestRequestSchema', () => {
-  it('accepts minimal valid body', () => {
+  it('accepts unusedCode only (Knip)', () => {
     const raw = {
       timestamp: new Date().toISOString(),
       signals: { unusedCode: emptyUnusedCode },
+    };
+    expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
+  });
+
+  it('accepts cve only', () => {
+    const raw = {
+      timestamp: new Date().toISOString(),
+      signals: {
+        cve: {
+          lockfileType: 'pnpm',
+          prod: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+          dev: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+        },
+      },
+    };
+    expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
+  });
+
+  it('accepts unusedCode and cve together', () => {
+    const raw = {
+      timestamp: new Date().toISOString(),
+      signals: {
+        unusedCode: emptyUnusedCode,
+        cve: {
+          lockfileType: 'npm',
+          prod: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+          dev: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+        },
+      },
     };
     expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
   });
@@ -38,7 +67,7 @@ describe('healthIngestRequestSchema', () => {
     expect(healthIngestRequestSchema.safeParse(raw).success).toBe(false);
   });
 
-  it('rejects missing unusedCode on signals', () => {
+  it('rejects missing both unusedCode and cve', () => {
     const raw = {
       timestamp: new Date().toISOString(),
       signals: {},
@@ -46,7 +75,7 @@ describe('healthIngestRequestSchema', () => {
     expect(healthIngestRequestSchema.safeParse(raw).success).toBe(false);
   });
 
-  it('rejects signals with empty object where unusedCode fields are missing', () => {
+  it('rejects signals with empty unusedCode object when cve absent', () => {
     const raw = {
       timestamp: new Date().toISOString(),
       signals: { unusedCode: {} },

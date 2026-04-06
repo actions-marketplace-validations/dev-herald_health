@@ -10,8 +10,19 @@ inputs:
     required: true
 
   knip-report-path:
-    description: 'Path to a Knip JSON report file'
-    required: true
+    description: 'Path to a Knip JSON report file (optional if a lockfile is present for CVE scanning)'
+    required: false
+    default: ''
+
+  lockfile-path:
+    description: 'Optional path to lockfile; otherwise auto-detects pnpm-lock.yaml, yarn.lock, package-lock.json, or bun.lock (CVE/OSV uses npm and pnpm only; yarn or bun emits a warning and skips CVE)'
+    required: false
+    default: ''
+
+  cve-detail:
+    description: 'If true, fetch per-vulnerability details from OSV for severity breakdown (slower). Default: totals only.'
+    required: false
+    default: 'false'
 
   api-url:
     description: 'Dev Herald ingest API endpoint'

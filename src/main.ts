@@ -2,7 +2,10 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { buildHeaders, makeHttpRequest } from './api';
 import { buildHealthIngestPayload } from './build-payload';
+import { detectLockfile } from './lockfile/detect';
+import { parseLockfile } from './lockfile/parse-lockfile';
 import { actionInputsSchema } from './schemas/inputs';
+import { computeCveAggregates } from './signals/cve';
 import { mapKnipReportToSignals } from './signals/knip';
 import { readAndValidateKnipReport } from './read-knip-files';
 import type { IngestSuccessData } from './types';
@@ -17,7 +20,9 @@ function optionalString(v: string): string | undefined {
 async function run(): Promise<void> {
   try {
     const apiKey = core.getInput('api-key', { required: true });
-    const knipReportPath = core.getInput('knip-report-path', { required: true });
+    const knipReportPathRaw = core.getInput('knip-report-path');
+    const lockfilePathRaw = core.getInput('lockfile-path');
+    const cveDetailRaw = core.getInput('cve-detail');
     const apiUrl = optionalString(core.getInput('api-url')) ?? DEFAULT_API_URL;
 
     const ctx = github.context;
@@ -31,7 +36,9 @@ async function run(): Promise<void> {
 
     const inputsParsed = actionInputsSchema.safeParse({
       apiKey,
-      knipReportPath,
+      knipReportPath: knipReportPathRaw,
+      lockfilePath: lockfilePathRaw,
+      cveDetail: cveDetailRaw,
       apiUrl,
       repositoryFullName,
       commitSha,
@@ -44,19 +51,55 @@ async function run(): Promise<void> {
     }
 
     const v = inputsParsed.data;
-    const knipReport = readAndValidateKnipReport(v.knipReportPath);
-    const unusedCode = mapKnipReportToSignals(knipReport);
+
+    let unusedCode;
+    if (v.knipReportPath.length > 0) {
+      const knipReport = readAndValidateKnipReport(v.knipReportPath);
+      unusedCode = mapKnipReportToSignals(knipReport);
+      core.info(
+        `Unused code lists: files=${unusedCode.unusedFilesList.length}, deps=${unusedCode.unusedDepsList.length}, typeExports=${unusedCode.unusedTypeExportsList.length}`
+      );
+    }
+
+    let cveAgg;
+    const workspaceRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
+    const lockOverride = v.lockfilePath.length > 0 ? v.lockfilePath : undefined;
+
+    try {
+      const detected = detectLockfile(workspaceRoot, lockOverride);
+      if (detected.type === 'yarn' || detected.type === 'bun') {
+        core.warning(
+          `CVE scanning supports npm and pnpm lockfiles only; detected ${detected.type} at ${detected.path}. Skipping OSV. Add pnpm-lock.yaml or package-lock.json, or set lockfile-path to one of those.`
+        );
+      } else {
+        const deps = parseLockfile(detected.type, detected.path);
+        core.info(`Lockfile ${detected.type}: ${detected.path} (${deps.length} packages)`);
+        cveAgg = await computeCveAggregates(detected.type, deps, { detail: v.cveDetail });
+        core.info(
+          `CVE: prod vulnerablePackages=${cveAgg.prod.vulnerablePackages} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.vulnerablePackages} totalVulns=${cveAgg.dev.totalVulnerabilities}`
+        );
+      }
+    } catch (e) {
+      if (lockOverride) {
+        throw e;
+      }
+      core.info(`CVE scan skipped: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    if (!unusedCode && !cveAgg) {
+      throw new Error(
+        'No knip report path provided and no lockfile found. Provide knip-report-path and/or a supported lockfile at the repository root.'
+      );
+    }
 
     const payload = buildHealthIngestPayload({
       unusedCode,
+      cve: cveAgg,
       repositoryFullName: v.repositoryFullName,
       commitSha: v.commitSha,
       workflowRunUrl: v.workflowRunUrl,
     });
 
-    core.info(
-      `Unused code lists: files=${unusedCode.unusedFilesList.length}, deps=${unusedCode.unusedDepsList.length}, typeExports=${unusedCode.unusedTypeExportsList.length}`
-    );
     core.info(`POST ${v.apiUrl}`);
 
     const headers = buildHeaders(v.apiKey);
@@ -81,7 +124,7 @@ async function run(): Promise<void> {
       'data' in json &&
       typeof (json as { data: unknown }).data === 'object' &&
       (json as { data: unknown }).data !== null
-        ? ((json as { data: IngestSuccessData }).data)
+        ? (json as { data: IngestSuccessData }).data
         : null;
 
     const reportId = data && typeof data.reportId === 'string' ? data.reportId : undefined;

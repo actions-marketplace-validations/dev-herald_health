@@ -6,11 +6,39 @@ export const unusedCodeSchema = z.object({
   unusedTypeExportsList: z.array(z.string()),
 });
 
-export const healthSignalsSchema = z
+export const cveSeverityBucketsSchema = z.object({
+  critical: z.number().int().min(0),
+  high: z.number().int().min(0),
+  moderate: z.number().int().min(0),
+  low: z.number().int().min(0),
+  unknown: z.number().int().min(0),
+});
+
+export const cveDepsSignalSchema = z
   .object({
-    unusedCode: unusedCodeSchema,
+    vulnerablePackages: z.number().int().min(0),
+    totalVulnerabilities: z.number().int().min(0),
+    severity: cveSeverityBucketsSchema.optional(),
   })
   .passthrough();
+
+export const cveSignalsSchema = z
+  .object({
+    lockfileType: z.string().min(1),
+    prod: cveDepsSignalSchema,
+    dev: cveDepsSignalSchema,
+  })
+  .passthrough();
+
+export const healthSignalsSchema = z
+  .object({
+    unusedCode: unusedCodeSchema.optional(),
+    cve: cveSignalsSchema.optional(),
+  })
+  .passthrough()
+  .refine((s) => s.unusedCode !== undefined || s.cve !== undefined, {
+    message: 'signals must include unusedCode (Knip) and/or cve',
+  });
 
 export const healthIngestRequestSchema = z
   .object({

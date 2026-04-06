@@ -29971,7 +29971,8 @@ async function makeHttpRequest(url, method, headers, body) {
             reject(new Error(`Only HTTPS URLs are allowed for security reasons. Got: ${parsedUrl.protocol}`));
             return;
         }
-        const payload = JSON.stringify(body);
+        const hasBody = body !== undefined && method !== 'GET' && method !== 'HEAD';
+        const payload = hasBody ? JSON.stringify(body) : '';
         const options = {
             hostname: parsedUrl.hostname,
             port: parsedUrl.port || 443,
@@ -29979,7 +29980,7 @@ async function makeHttpRequest(url, method, headers, body) {
             method,
             headers: {
                 ...headers,
-                'Content-Length': Buffer.byteLength(payload),
+                ...(hasBody ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
             },
         };
         const req = https.request(options, (res) => {
@@ -29997,7 +29998,9 @@ async function makeHttpRequest(url, method, headers, body) {
         req.on('error', (error) => {
             reject(new Error(`Network error: ${error.message}`));
         });
-        req.write(payload);
+        if (hasBody) {
+            req.write(payload);
+        }
         req.end();
     });
 }
@@ -30020,15 +30023,32 @@ function buildHeaders(apiKey) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.buildHealthIngestPayload = buildHealthIngestPayload;
 const ingest_body_1 = __nccwpck_require__(9022);
+function cveToPayloadShape(c) {
+    return {
+        lockfileType: c.lockfileType,
+        prod: {
+            vulnerablePackages: c.prod.vulnerablePackages,
+            totalVulnerabilities: c.prod.totalVulnerabilities,
+            ...(c.prod.severity ? { severity: c.prod.severity } : {}),
+        },
+        dev: {
+            vulnerablePackages: c.dev.vulnerablePackages,
+            totalVulnerabilities: c.dev.totalVulnerabilities,
+            ...(c.dev.severity ? { severity: c.dev.severity } : {}),
+        },
+    };
+}
 function buildHealthIngestPayload(options) {
+    if (!options.unusedCode && !options.cve) {
+        throw new Error('At least one of unusedCode (Knip) or cve signals is required');
+    }
+    const signals = {
+        ...(options.unusedCode ? { unusedCode: options.unusedCode } : {}),
+        ...(options.cve ? { cve: cveToPayloadShape(options.cve) } : {}),
+    };
     const body = {
         timestamp: new Date().toISOString(),
-        signals: {
-            knip: {
-                unusedFiles: options.knip.unusedFiles,
-                unusedDependencies: options.knip.unusedDependencies,
-            },
-        },
+        signals,
         ...(options.schemaVersion !== undefined ? { schemaVersion: options.schemaVersion } : {}),
         ...(options.repositoryFullName ? { repositoryFullName: options.repositoryFullName } : {}),
         ...(options.commitSha ? { commitSha: options.commitSha } : {}),
@@ -30040,6 +30060,311 @@ function buildHealthIngestPayload(options) {
         throw new Error(`Ingest payload validation failed: ${msg}`);
     }
     return parsed.data;
+}
+
+
+/***/ }),
+
+/***/ 4351:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.inferLockfileTypeFromFilename = inferLockfileTypeFromFilename;
+exports.detectLockfile = detectLockfile;
+const fs_1 = __nccwpck_require__(9896);
+const path_1 = __nccwpck_require__(6928);
+const PRIORITY = [
+    { file: 'pnpm-lock.yaml', type: 'pnpm' },
+    { file: 'yarn.lock', type: 'yarn' },
+    { file: 'package-lock.json', type: 'npm' },
+    { file: 'bun.lock', type: 'bun' },
+];
+function inferLockfileTypeFromFilename(filename) {
+    const base = filename.split(/[/\\]/).pop()?.toLowerCase() ?? '';
+    if (base === 'pnpm-lock.yaml')
+        return 'pnpm';
+    if (base === 'yarn.lock')
+        return 'yarn';
+    if (base === 'package-lock.json')
+        return 'npm';
+    if (base === 'bun.lock')
+        return 'bun';
+    return undefined;
+}
+function detectLockfile(workspaceRoot, overridePath) {
+    if (overridePath !== undefined && overridePath.trim().length > 0) {
+        const full = (0, path_1.resolve)(overridePath.trim());
+        if (!(0, fs_1.existsSync)(full)) {
+            throw new Error(`lockfile-path not found: ${full}`);
+        }
+        const inferred = inferLockfileTypeFromFilename(full);
+        if (!inferred) {
+            throw new Error(`Could not infer lockfile type from filename; use pnpm-lock.yaml, yarn.lock, package-lock.json, or bun.lock`);
+        }
+        return { type: inferred, path: full };
+    }
+    for (const { file, type } of PRIORITY) {
+        const full = (0, path_1.join)(workspaceRoot, file);
+        if ((0, fs_1.existsSync)(full)) {
+            return { type, path: full };
+        }
+    }
+    throw new Error(`No lockfile found in ${workspaceRoot}. Expected one of: ${PRIORITY.map((p) => p.file).join(', ')}`);
+}
+
+
+/***/ }),
+
+/***/ 2743:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseLockfile = parseLockfile;
+const fs_1 = __nccwpck_require__(9896);
+const parse_npm_1 = __nccwpck_require__(3725);
+const parse_pnpm_1 = __nccwpck_require__(5499);
+/**
+ * Yarn and Bun lockfiles may still be chosen by {@link detectLockfile} ordering;
+ * CVE dependency extraction supports npm and pnpm only. Callers should warn when
+ * type is `yarn` or `bun` and skip OSV aggregation.
+ */
+function parseLockfile(type, lockfilePath) {
+    const content = (0, fs_1.readFileSync)(lockfilePath, 'utf8');
+    switch (type) {
+        case 'npm':
+            return (0, parse_npm_1.parseNpmLockfile)(content);
+        case 'pnpm':
+            return (0, parse_pnpm_1.parsePnpmLockfile)(content);
+        case 'yarn':
+        case 'bun':
+            return [];
+        default: {
+            const _x = type;
+            throw new Error(`Unknown lockfile type: ${_x}`);
+        }
+    }
+}
+
+
+/***/ }),
+
+/***/ 3725:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.pathToPackageName = pathToPackageName;
+exports.parseNpmLockfile = parseNpmLockfile;
+exports.dedupeDependencies = dedupeDependencies;
+function collectV1(deps, devChain, out) {
+    if (!deps)
+        return;
+    for (const [name, entry] of Object.entries(deps)) {
+        if (!entry?.version)
+            continue;
+        const isDev = devChain || entry.dev === true;
+        out.push({ name, version: entry.version, isDev });
+        collectV1(entry.dependencies, isDev, out);
+    }
+}
+function pathToPackageName(lockPath) {
+    if (lockPath === '' || lockPath === '.')
+        return null;
+    const needle = '/node_modules/';
+    const idx = lockPath.lastIndexOf(needle);
+    if (idx >= 0) {
+        const name = lockPath.slice(idx + needle.length);
+        return name.length > 0 ? name : null;
+    }
+    if (lockPath.startsWith('node_modules/')) {
+        const tail = lockPath.slice('node_modules/'.length);
+        const segments = tail.split('/node_modules/');
+        return segments[segments.length - 1] ?? null;
+    }
+    return null;
+}
+function parseNpmLockfile(content) {
+    const raw = JSON.parse(content);
+    const lv = raw.lockfileVersion;
+    if (typeof lv !== 'number') {
+        throw new Error('package-lock.json: missing lockfileVersion');
+    }
+    if ('packages' in raw && raw.packages && typeof raw.packages === 'object') {
+        const out = [];
+        for (const [path, pkg] of Object.entries(raw.packages)) {
+            if (path === '' || !pkg?.version)
+                continue;
+            const name = pathToPackageName(path);
+            if (!name)
+                continue;
+            out.push({
+                name,
+                version: pkg.version,
+                isDev: pkg.dev === true,
+            });
+        }
+        return dedupeDependencies(out);
+    }
+    const v1 = raw;
+    if (!v1.dependencies) {
+        return [];
+    }
+    const out = [];
+    collectV1(v1.dependencies, false, out);
+    return dedupeDependencies(out);
+}
+function dedupeDependencies(deps) {
+    const map = new Map();
+    for (const d of deps) {
+        const key = `${d.name}\0${d.version}`;
+        const prev = map.get(key);
+        if (!prev) {
+            map.set(key, { ...d });
+        }
+        else if (prev.isDev && !d.isDev) {
+            map.set(key, { ...d });
+        }
+    }
+    return [...map.values()];
+}
+
+
+/***/ }),
+
+/***/ 5499:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.stripPeerSuffixFromKey = stripPeerSuffixFromKey;
+exports.parsePnpmPackageKey = parsePnpmPackageKey;
+exports.collectPnpmImporterProdDev = collectPnpmImporterProdDev;
+exports.extractPnpmPackageKeys = extractPnpmPackageKeys;
+exports.parsePnpmLockfile = parsePnpmLockfile;
+const parse_npm_1 = __nccwpck_require__(3725);
+function stripPeerSuffixFromKey(key) {
+    const p = key.indexOf('(');
+    return p >= 0 ? key.slice(0, p) : key;
+}
+function parsePnpmPackageKey(key) {
+    const head = stripPeerSuffixFromKey(key.trim());
+    const at = head.lastIndexOf('@');
+    if (at <= 0 || at === head.length - 1)
+        return null;
+    const name = head.slice(0, at);
+    const version = head.slice(at + 1);
+    if (!name || !version)
+        return null;
+    return { name, version };
+}
+function normalizeImporterVersion(v) {
+    return stripPeerSuffixFromKey(v.trim());
+}
+function collectPnpmImporterProdDev(content) {
+    const prod = new Set();
+    const dev = new Set();
+    const beforePackages = content.split(/^packages:\s*$/m)[0] ?? content;
+    const importersChunk = beforePackages.split(/^importers:\s*$/m)[1];
+    if (!importersChunk)
+        return { prod, dev };
+    const lines = importersChunk.split(/\r?\n/);
+    function parseDepBlock(target) {
+        while (lines[i] !== undefined) {
+            const line = lines[i] ?? '';
+            if (line.startsWith('    ') && !line.startsWith('      ')) {
+                break;
+            }
+            if (!line.startsWith('      ')) {
+                i++;
+                continue;
+            }
+            const nameM = line.match(/^ {6}(?:'([^']+)'|"([^"]+)"|([^:]+)):\s*$/);
+            if (!nameM) {
+                i++;
+                continue;
+            }
+            const pkgName = (nameM[1] ?? nameM[2] ?? nameM[3] ?? '').trim();
+            i++;
+            let ver = '';
+            while (lines[i] !== undefined && /^ {8}/.test(lines[i])) {
+                const vm = lines[i].match(/^\s+version:\s*(.+)$/);
+                if (vm) {
+                    let v = vm[1].trim();
+                    if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) {
+                        v = v.slice(1, -1);
+                    }
+                    ver = normalizeImporterVersion(v);
+                }
+                i++;
+            }
+            if (pkgName && ver)
+                target.add(`${pkgName}@${ver}`);
+        }
+    }
+    let i = 0;
+    while (i < lines.length) {
+        const L = lines[i] ?? '';
+        if (L.match(/^ {4}dependencies:\s*$/)) {
+            i++;
+            parseDepBlock(prod);
+            continue;
+        }
+        if (L.match(/^ {4}devDependencies:\s*$/)) {
+            i++;
+            parseDepBlock(dev);
+            continue;
+        }
+        i++;
+    }
+    return { prod, dev };
+}
+function extractPnpmPackageKeys(content) {
+    const keys = [];
+    const lines = content.split(/\r?\n/);
+    let i = 0;
+    while (i < lines.length && !/^packages:\s*$/.test(lines[i] ?? ''))
+        i++;
+    if (i >= lines.length)
+        return keys;
+    i++;
+    while (i < lines.length) {
+        const line = lines[i] ?? '';
+        if (/^\S/.test(line) && line.trim().length > 0)
+            break;
+        const m = line.match(/^\s+(?:'([^']+)'|"([^"]+)"|([^:]+)):\s*$/);
+        if (m) {
+            const key = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+            if (key)
+                keys.push(key);
+        }
+        i++;
+    }
+    return keys;
+}
+function parsePnpmLockfile(content) {
+    const pkgKeys = extractPnpmPackageKeys(content);
+    const { prod, dev } = collectPnpmImporterProdDev(content);
+    const out = [];
+    for (const rawKey of pkgKeys) {
+        const parsed = parsePnpmPackageKey(rawKey);
+        if (!parsed)
+            continue;
+        const composite = `${parsed.name}@${parsed.version}`;
+        const inImporter = prod.has(composite) || dev.has(composite);
+        const isDev = inImporter ? !prod.has(composite) && dev.has(composite) : false;
+        out.push({
+            name: parsed.name,
+            version: parsed.version,
+            isDev,
+        });
+    }
+    return (0, parse_npm_1.dedupeDependencies)(out);
 }
 
 
@@ -30088,7 +30413,10 @@ const core = __importStar(__nccwpck_require__(6966));
 const github = __importStar(__nccwpck_require__(4903));
 const api_1 = __nccwpck_require__(7822);
 const build_payload_1 = __nccwpck_require__(1777);
+const detect_1 = __nccwpck_require__(4351);
+const parse_lockfile_1 = __nccwpck_require__(2743);
 const inputs_1 = __nccwpck_require__(5599);
+const cve_1 = __nccwpck_require__(4988);
 const knip_1 = __nccwpck_require__(3770);
 const read_knip_files_1 = __nccwpck_require__(6723);
 const DEFAULT_API_URL = 'https://dev-herald.com/api/v1/health/ingest';
@@ -30099,7 +30427,9 @@ function optionalString(v) {
 async function run() {
     try {
         const apiKey = core.getInput('api-key', { required: true });
-        const knipReportPath = core.getInput('knip-report-path', { required: true });
+        const knipReportPathRaw = core.getInput('knip-report-path');
+        const lockfilePathRaw = core.getInput('lockfile-path');
+        const cveDetailRaw = core.getInput('cve-detail');
         const apiUrl = optionalString(core.getInput('api-url')) ?? DEFAULT_API_URL;
         const ctx = github.context;
         const repositoryFullName = optionalString(core.getInput('repository-full-name')) ??
@@ -30109,7 +30439,9 @@ async function run() {
         const workflowRunUrl = optionalString(core.getInput('workflow-run-url'));
         const inputsParsed = inputs_1.actionInputsSchema.safeParse({
             apiKey,
-            knipReportPath,
+            knipReportPath: knipReportPathRaw,
+            lockfilePath: lockfilePathRaw,
+            cveDetail: cveDetailRaw,
             apiUrl,
             repositoryFullName,
             commitSha,
@@ -30120,15 +30452,43 @@ async function run() {
             throw new Error(msg);
         }
         const v = inputsParsed.data;
-        const knipReport = (0, read_knip_files_1.readAndValidateKnipReport)(v.knipReportPath);
-        const knipAgg = (0, knip_1.mapKnipReportToSignals)(knipReport);
+        let unusedCode;
+        if (v.knipReportPath.length > 0) {
+            const knipReport = (0, read_knip_files_1.readAndValidateKnipReport)(v.knipReportPath);
+            unusedCode = (0, knip_1.mapKnipReportToSignals)(knipReport);
+            core.info(`Unused code lists: files=${unusedCode.unusedFilesList.length}, deps=${unusedCode.unusedDepsList.length}, typeExports=${unusedCode.unusedTypeExportsList.length}`);
+        }
+        let cveAgg;
+        const workspaceRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
+        const lockOverride = v.lockfilePath.length > 0 ? v.lockfilePath : undefined;
+        try {
+            const detected = (0, detect_1.detectLockfile)(workspaceRoot, lockOverride);
+            if (detected.type === 'yarn' || detected.type === 'bun') {
+                core.warning(`CVE scanning supports npm and pnpm lockfiles only; detected ${detected.type} at ${detected.path}. Skipping OSV. Add pnpm-lock.yaml or package-lock.json, or set lockfile-path to one of those.`);
+            }
+            else {
+                const deps = (0, parse_lockfile_1.parseLockfile)(detected.type, detected.path);
+                core.info(`Lockfile ${detected.type}: ${detected.path} (${deps.length} packages)`);
+                cveAgg = await (0, cve_1.computeCveAggregates)(detected.type, deps, { detail: v.cveDetail });
+                core.info(`CVE: prod vulnerablePackages=${cveAgg.prod.vulnerablePackages} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.vulnerablePackages} totalVulns=${cveAgg.dev.totalVulnerabilities}`);
+            }
+        }
+        catch (e) {
+            if (lockOverride) {
+                throw e;
+            }
+            core.info(`CVE scan skipped: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        if (!unusedCode && !cveAgg) {
+            throw new Error('No knip report path provided and no lockfile found. Provide knip-report-path and/or a supported lockfile at the repository root.');
+        }
         const payload = (0, build_payload_1.buildHealthIngestPayload)({
-            knip: knipAgg,
+            unusedCode,
+            cve: cveAgg,
             repositoryFullName: v.repositoryFullName,
             commitSha: v.commitSha,
             workflowRunUrl: v.workflowRunUrl,
         });
-        core.info(`Knip aggregates: unusedFiles=${knipAgg.unusedFiles}, unusedDependencies=${knipAgg.unusedDependencies}`);
         core.info(`POST ${v.apiUrl}`);
         const headers = (0, api_1.buildHeaders)(v.apiKey);
         const response = await (0, api_1.makeHttpRequest)(v.apiUrl, 'POST', headers, payload);
@@ -30149,7 +30509,7 @@ async function run() {
             'data' in json &&
             typeof json.data === 'object' &&
             json.data !== null
-            ? (json.data)
+            ? json.data
             : null;
         const reportId = data && typeof data.reportId === 'string' ? data.reportId : undefined;
         if (reportId) {
@@ -30242,25 +30602,94 @@ function readAndValidateKnipReport(path) {
 
 /***/ }),
 
+/***/ 7110:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.osvVulnDetailSchema = exports.osvVulnSeveritySchema = exports.osvQueryBatchResponseSchema = exports.osvBatchQueryItemSchema = void 0;
+const zod_1 = __nccwpck_require__(7151);
+exports.osvBatchQueryItemSchema = zod_1.z
+    .object({
+    package: zod_1.z.object({
+        name: zod_1.z.string(),
+        ecosystem: zod_1.z.string().optional(),
+        purl: zod_1.z.string().optional(),
+    }),
+    version: zod_1.z.string().optional(),
+    commit: zod_1.z.string().optional(),
+    page_token: zod_1.z.string().optional(),
+})
+    .passthrough();
+exports.osvQueryBatchResponseSchema = zod_1.z.object({
+    results: zod_1.z.array(zod_1.z
+        .object({
+        vulns: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string(), modified: zod_1.z.string().optional() })).optional(),
+        next_page_token: zod_1.z.string().optional(),
+    })
+        .passthrough()),
+});
+exports.osvVulnSeveritySchema = zod_1.z
+    .object({
+    type: zod_1.z.string().optional(),
+    score: zod_1.z.string().optional(),
+})
+    .passthrough();
+exports.osvVulnDetailSchema = zod_1.z
+    .object({
+    id: zod_1.z.string(),
+    severity: zod_1.z.array(exports.osvVulnSeveritySchema).optional(),
+    database_specific: zod_1.z.record(zod_1.z.string(), zod_1.z.any()).optional(),
+})
+    .passthrough();
+
+
+/***/ }),
+
 /***/ 9022:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.healthIngestRequestSchema = exports.healthSignalsSchema = exports.knipSignalsSchema = void 0;
+exports.healthIngestRequestSchema = exports.healthSignalsSchema = exports.cveSignalsSchema = exports.cveDepsSignalSchema = exports.cveSeverityBucketsSchema = exports.unusedCodeSchema = void 0;
 const zod_1 = __nccwpck_require__(7151);
-exports.knipSignalsSchema = zod_1.z
+exports.unusedCodeSchema = zod_1.z.object({
+    unusedDepsList: zod_1.z.array(zod_1.z.string()),
+    unusedFilesList: zod_1.z.array(zod_1.z.string()),
+    unusedTypeExportsList: zod_1.z.array(zod_1.z.string()),
+});
+exports.cveSeverityBucketsSchema = zod_1.z.object({
+    critical: zod_1.z.number().int().min(0),
+    high: zod_1.z.number().int().min(0),
+    moderate: zod_1.z.number().int().min(0),
+    low: zod_1.z.number().int().min(0),
+    unknown: zod_1.z.number().int().min(0),
+});
+exports.cveDepsSignalSchema = zod_1.z
     .object({
-    unusedFiles: zod_1.z.number().int().min(0),
-    unusedDependencies: zod_1.z.number().int().min(0),
+    vulnerablePackages: zod_1.z.number().int().min(0),
+    totalVulnerabilities: zod_1.z.number().int().min(0),
+    severity: exports.cveSeverityBucketsSchema.optional(),
+})
+    .passthrough();
+exports.cveSignalsSchema = zod_1.z
+    .object({
+    lockfileType: zod_1.z.string().min(1),
+    prod: exports.cveDepsSignalSchema,
+    dev: exports.cveDepsSignalSchema,
 })
     .passthrough();
 exports.healthSignalsSchema = zod_1.z
     .object({
-    knip: exports.knipSignalsSchema,
+    unusedCode: exports.unusedCodeSchema.optional(),
+    cve: exports.cveSignalsSchema.optional(),
 })
-    .passthrough();
+    .passthrough()
+    .refine((s) => s.unusedCode !== undefined || s.cve !== undefined, {
+    message: 'signals must include unusedCode (Knip) and/or cve',
+});
 exports.healthIngestRequestSchema = zod_1.z
     .object({
     timestamp: zod_1.z
@@ -30291,8 +30720,22 @@ exports.actionInputsSchema = zod_1.z.object({
     apiKey: nonEmpty,
     knipReportPath: zod_1.z
         .string()
-        .transform((s) => s.trim())
-        .pipe(zod_1.z.string().min(1, 'Provide knip-report-path')),
+        .optional()
+        .default('')
+        .transform((s) => s.trim()),
+    lockfilePath: zod_1.z
+        .string()
+        .optional()
+        .default('')
+        .transform((s) => s.trim()),
+    cveDetail: zod_1.z
+        .string()
+        .optional()
+        .default('false')
+        .transform((s) => {
+        const v = s.trim().toLowerCase();
+        return v === 'true' || v === '1' || v === 'yes';
+    }),
     apiUrl: zod_1.z
         .string()
         .min(1)
@@ -30321,6 +30764,7 @@ const knipIssueRowSchema = zod_1.z
     files: zod_1.z.array(knipNamedItemSchema).optional(),
     dependencies: zod_1.z.array(knipNamedItemSchema).optional(),
     devDependencies: zod_1.z.array(knipNamedItemSchema).optional(),
+    types: zod_1.z.array(knipNamedItemSchema).optional(),
 })
     .passthrough();
 exports.knipReportSchema = zod_1.z
@@ -30329,6 +30773,220 @@ exports.knipReportSchema = zod_1.z
     files: zod_1.z.array(zod_1.z.string()).optional(),
 })
     .passthrough();
+
+
+/***/ }),
+
+/***/ 4988:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.OSV_QUERY_BATCH_URL = void 0;
+exports.bucketizeScore = bucketizeScore;
+exports.computeCveAggregates = computeCveAggregates;
+const api_1 = __nccwpck_require__(7822);
+const cve_1 = __nccwpck_require__(7110);
+exports.OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
+const BATCH_SIZE = 500;
+const DETAIL_CONCURRENCY = 10;
+const emptySeverity = () => ({
+    critical: 0,
+    high: 0,
+    moderate: 0,
+    low: 0,
+    unknown: 0,
+});
+function parseCvssScore(s) {
+    if (!s)
+        return undefined;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : undefined;
+}
+function bucketizeScore(score) {
+    if (score >= 9.0)
+        return 'critical';
+    if (score >= 7.0)
+        return 'high';
+    if (score >= 4.0)
+        return 'moderate';
+    if (score > 0)
+        return 'low';
+    return 'unknown';
+}
+function severityFromDetail(detail) {
+    const parsed = cve_1.osvVulnDetailSchema.safeParse(detail);
+    if (!parsed.success)
+        return 'unknown';
+    const d = parsed.data;
+    let best;
+    if (Array.isArray(d.severity)) {
+        for (const s of d.severity) {
+            const sc = parseCvssScore(s.score);
+            if (sc !== undefined && (best === undefined || sc > best))
+                best = sc;
+        }
+    }
+    const ds = d.database_specific;
+    if (best === undefined && ds && typeof ds === 'object') {
+        const sev = ds['severity'];
+        if (typeof sev === 'string') {
+            const u = sev.toUpperCase();
+            if (u === 'CRITICAL')
+                return 'critical';
+            if (u === 'HIGH')
+                return 'high';
+            if (u === 'MODERATE' || u === 'MEDIUM')
+                return 'moderate';
+            if (u === 'LOW')
+                return 'low';
+        }
+    }
+    if (best === undefined)
+        return 'unknown';
+    return bucketizeScore(best);
+}
+async function osvQueryBatchAll(queries) {
+    const allResults = [];
+    for (let offset = 0; offset < queries.length; offset += BATCH_SIZE) {
+        const slice = queries.slice(offset, offset + BATCH_SIZE);
+        let merged = [];
+        let pageTokens = undefined;
+        for (;;) {
+            const reqQueries = slice.map((q, i) => pageTokens?.[i] ? { ...q, page_token: pageTokens[i] } : q);
+            const res = await (0, api_1.makeHttpRequest)(exports.OSV_QUERY_BATCH_URL, 'POST', {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Dev-Herald-Health-Ingest-Action/1.0',
+            }, { queries: reqQueries });
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+                throw new Error(`OSV querybatch failed (${res.statusCode}): ${res.data.slice(0, 500)}`);
+            }
+            let raw;
+            try {
+                raw = JSON.parse(res.data);
+            }
+            catch {
+                throw new Error('OSV querybatch: invalid JSON response');
+            }
+            const parsed = cve_1.osvQueryBatchResponseSchema.safeParse(raw);
+            if (!parsed.success) {
+                throw new Error('OSV querybatch: schema validation failed');
+            }
+            if (!pageTokens) {
+                merged = parsed.data.results.map((r) => ({
+                    vulns: [...(r.vulns ?? [])],
+                    next_page_token: r.next_page_token,
+                }));
+            }
+            else {
+                for (let i = 0; i < merged.length; i++) {
+                    const next = parsed.data.results[i];
+                    merged[i].vulns = [...(merged[i].vulns ?? []), ...(next.vulns ?? [])];
+                    merged[i].next_page_token = next.next_page_token;
+                }
+            }
+            pageTokens = merged.map((r) => r.next_page_token);
+            if (!pageTokens.some((t) => t !== undefined)) {
+                break;
+            }
+        }
+        allResults.push(...merged);
+    }
+    return allResults;
+}
+async function fetchVulnDetailsParallel(ids) {
+    const unique = [...new Set(ids)];
+    const out = new Map();
+    let idx = 0;
+    async function worker() {
+        for (;;) {
+            const i = idx++;
+            if (i >= unique.length)
+                return;
+            const id = unique[i];
+            const url = `https://api.osv.dev/v1/vulns/${encodeURIComponent(id)}`;
+            const res = await (0, api_1.makeHttpRequest)(url, 'GET', {
+                'User-Agent': 'Dev-Herald-Health-Ingest-Action/1.0',
+            });
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+                try {
+                    const json = JSON.parse(res.data);
+                    out.set(id, severityFromDetail(json));
+                }
+                catch {
+                    out.set(id, 'unknown');
+                }
+            }
+            else {
+                out.set(id, 'unknown');
+            }
+        }
+    }
+    const workers = Array.from({ length: Math.min(DETAIL_CONCURRENCY, unique.length) }, () => worker());
+    await Promise.all(workers);
+    return out;
+}
+function aggregateFromBatch(deps, batchResults, severityMap) {
+    let vulnerablePackages = 0;
+    let totalVulnerabilities = 0;
+    const severity = severityMap ? emptySeverity() : undefined;
+    const seenVulnIds = new Set();
+    for (let i = 0; i < deps.length; i++) {
+        const row = batchResults[i];
+        const vulns = row?.vulns ?? [];
+        if (vulns.length === 0)
+            continue;
+        vulnerablePackages++;
+        totalVulnerabilities += vulns.length;
+        if (severityMap && severity) {
+            for (const v of vulns) {
+                if (seenVulnIds.has(v.id))
+                    continue;
+                seenVulnIds.add(v.id);
+                const bucket = severityMap.get(v.id) ?? 'unknown';
+                severity[bucket]++;
+            }
+        }
+    }
+    return {
+        vulnerablePackages,
+        totalVulnerabilities,
+        ...(severity ? { severity } : {}),
+    };
+}
+async function computeCveAggregates(lockfileType, dependencies, options) {
+    const prodIdx = [];
+    const devIdx = [];
+    dependencies.forEach((d, i) => (d.isDev ? devIdx : prodIdx).push(i));
+    const orderedDeps = [...prodIdx.map((i) => dependencies[i]), ...devIdx.map((i) => dependencies[i])];
+    const queries = orderedDeps.map((d) => ({
+        package: { name: d.name, ecosystem: 'npm' },
+        version: d.version,
+    }));
+    const results = await osvQueryBatchAll(queries);
+    const prodResults = prodIdx.map((_, j) => results[j]);
+    const devResults = devIdx.map((_, j) => results[prodIdx.length + j]);
+    const prodDeps = prodIdx.map((i) => dependencies[i]);
+    const devDeps = devIdx.map((i) => dependencies[i]);
+    let prodSeverityMap;
+    let devSeverityMap;
+    if (options.detail) {
+        const prodIds = prodResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
+        const devIds = devResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
+        const [prodMap, devMap] = await Promise.all([
+            prodIds.length ? fetchVulnDetailsParallel(prodIds) : Promise.resolve(new Map()),
+            devIds.length ? fetchVulnDetailsParallel(devIds) : Promise.resolve(new Map()),
+        ]);
+        prodSeverityMap = prodMap;
+        devSeverityMap = devMap;
+    }
+    return {
+        lockfileType,
+        prod: aggregateFromBatch(prodDeps, prodResults, prodSeverityMap),
+        dev: aggregateFromBatch(devDeps, devResults, devSeverityMap),
+    };
+}
 
 
 /***/ }),
@@ -30349,7 +31007,8 @@ function mapKnipReportToSignals(report) {
             }
         }
     }
-    let unusedDeps = 0;
+    const unusedDepsList = [];
+    const unusedTypeExportsList = [];
     for (const issue of report.issues) {
         if (Array.isArray(issue.files)) {
             for (const entry of issue.files) {
@@ -30360,14 +31019,34 @@ function mapKnipReportToSignals(report) {
         }
         const d = issue.dependencies;
         const dd = issue.devDependencies;
-        if (Array.isArray(d))
-            unusedDeps += d.length;
-        if (Array.isArray(dd))
-            unusedDeps += dd.length;
+        if (Array.isArray(d)) {
+            for (const dep of d) {
+                if (dep && typeof dep.name === 'string' && dep.name.length > 0) {
+                    unusedDepsList.push(dep.name);
+                }
+            }
+        }
+        if (Array.isArray(dd)) {
+            for (const dep of dd) {
+                if (dep && typeof dep.name === 'string' && dep.name.length > 0) {
+                    unusedDepsList.push(dep.name);
+                }
+            }
+        }
+        const types = issue.types;
+        if (Array.isArray(types)) {
+            const issueFile = typeof issue.file === 'string' ? issue.file : '';
+            for (const t of types) {
+                if (t && typeof t.name === 'string' && t.name.length > 0) {
+                    unusedTypeExportsList.push(issueFile.length > 0 ? `${issueFile}:${t.name}` : t.name);
+                }
+            }
+        }
     }
     return {
-        unusedFiles: filePaths.size,
-        unusedDependencies: unusedDeps,
+        unusedFilesList: [...filePaths],
+        unusedDepsList,
+        unusedTypeExportsList,
     };
 }
 
