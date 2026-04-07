@@ -23,7 +23,7 @@ On that same `with:` block you can add **`lockfile-path`** and **`cve-detail`** 
 The action reads a lockfile under the repo root by default (`pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lock` in that order). **OSV/CVE runs only for pnpm and npm lockfiles**; yarn or bun is skipped with a workflow warning.
 
 - **`lockfile-path`** — optional. Set to a specific file (for example in a monorepo). Omit or leave empty for auto-detect.
-- **`cve-detail`** — optional. `'true'` fetches per-issue detail from OSV for a severity breakdown (slower). Default `'false'` is totals only.
+- **`cve-detail`** — optional. With a supported lockfile, the action **always** sends `signals.cve` with `packages` (name, version, and OSV vulnerability ids for vulnerable deps). Set `'true'` to also call OSV per vulnerability for **per-issue severity**, optional **text summaries**, and **aggregate severity** counts (slower). With `'false'`, vulnerabilities are ids only (no severities or descriptions).
 
 You need **at least one** of a Knip report or a lockfile the CVE path can use. CVE-only example:
 

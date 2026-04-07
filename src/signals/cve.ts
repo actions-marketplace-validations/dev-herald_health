@@ -1,9 +1,12 @@
+import { z } from 'zod';
 import { makeHttpRequest } from '../api';
 import { osvQueryBatchResponseSchema, osvVulnDetailSchema, type OsvQueryBatchResponse } from '../schemas/cve';
 import type { Dependency } from '../lockfile/types';
 import type { LockfileType } from '../lockfile/types';
 
 export const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
+
+const DESCRIPTION_FALLBACK_MAX = 400;
 
 export interface SeverityBuckets {
   critical: number;
@@ -13,16 +16,30 @@ export interface SeverityBuckets {
   unknown: number;
 }
 
-export interface CveDepsAggregate {
-  vulnerablePackages: number;
+export type SeverityLabel = keyof SeverityBuckets;
+
+export interface CveVulnerabilityRef {
+  id: string;
+  severity?: SeverityLabel;
+  description?: string;
+}
+
+export interface CvePackageSignal {
+  name: string;
+  version: string;
+  vulnerabilities: CveVulnerabilityRef[];
+}
+
+export interface CveEnvSignal {
   totalVulnerabilities: number;
-  severity?: SeverityBuckets;
+  severity?: Partial<SeverityBuckets>;
+  packages: CvePackageSignal[];
 }
 
 export interface CveAggregates {
   lockfileType: LockfileType;
-  prod: CveDepsAggregate;
-  dev: CveDepsAggregate;
+  prod: CveEnvSignal;
+  dev: CveEnvSignal;
 }
 
 const BATCH_SIZE = 500;
@@ -50,10 +67,7 @@ export function bucketizeScore(score: number): keyof SeverityBuckets {
   return 'unknown';
 }
 
-function severityFromDetail(detail: unknown): keyof SeverityBuckets {
-  const parsed = osvVulnDetailSchema.safeParse(detail);
-  if (!parsed.success) return 'unknown';
-  const d = parsed.data;
+function severityFromParsedDetail(d: z.infer<typeof osvVulnDetailSchema>): keyof SeverityBuckets {
   let best: number | undefined;
 
   if (Array.isArray(d.severity)) {
@@ -77,6 +91,32 @@ function severityFromDetail(detail: unknown): keyof SeverityBuckets {
 
   if (best === undefined) return 'unknown';
   return bucketizeScore(best);
+}
+
+function descriptionFromParsedDetail(d: z.infer<typeof osvVulnDetailSchema>): string | undefined {
+  if (typeof d.summary === 'string') {
+    const t = d.summary.trim();
+    if (t.length > 0) return t;
+  }
+  if (typeof d.details === 'string') {
+    const trimmed = d.details.trim();
+    if (!trimmed) return undefined;
+    const firstBlock = trimmed.split(/\n\n+/)[0]?.trim() ?? '';
+    if (!firstBlock) return undefined;
+    return firstBlock.length > DESCRIPTION_FALLBACK_MAX
+      ? firstBlock.slice(0, DESCRIPTION_FALLBACK_MAX)
+      : firstBlock;
+  }
+  return undefined;
+}
+
+function metadataFromDetail(detail: unknown): { severity: keyof SeverityBuckets; description?: string } {
+  const parsed = osvVulnDetailSchema.safeParse(detail);
+  if (!parsed.success) return { severity: 'unknown' };
+  const d = parsed.data;
+  const severity = severityFromParsedDetail(d);
+  const description = descriptionFromParsedDetail(d);
+  return description !== undefined ? { severity, description } : { severity };
 }
 
 type BatchQuery = { package: { name: string; ecosystem: string }; version: string };
@@ -146,9 +186,11 @@ async function osvQueryBatchAll(queries: BatchQuery[]): Promise<OsvQueryBatchRes
   return allResults;
 }
 
-async function fetchVulnDetailsParallel(ids: string[]): Promise<Map<string, keyof SeverityBuckets>> {
+async function fetchVulnMetadataParallel(
+  ids: string[]
+): Promise<Map<string, { severity: keyof SeverityBuckets; description?: string }>> {
   const unique = [...new Set(ids)];
-  const out = new Map<string, keyof SeverityBuckets>();
+  const out = new Map<string, { severity: keyof SeverityBuckets; description?: string }>();
   let idx = 0;
 
   async function worker(): Promise<void> {
@@ -163,12 +205,12 @@ async function fetchVulnDetailsParallel(ids: string[]): Promise<Map<string, keyo
       if (res.statusCode >= 200 && res.statusCode < 300) {
         try {
           const json = JSON.parse(res.data) as unknown;
-          out.set(id, severityFromDetail(json));
+          out.set(id, metadataFromDetail(json));
         } catch {
-          out.set(id, 'unknown');
+          out.set(id, { severity: 'unknown' });
         }
       } else {
-        out.set(id, 'unknown');
+        out.set(id, { severity: 'unknown' });
       }
     }
   }
@@ -181,38 +223,59 @@ async function fetchVulnDetailsParallel(ids: string[]): Promise<Map<string, keyo
   return out;
 }
 
-function aggregateFromBatch(
+export function packagesFromBatchResults(
   deps: Dependency[],
-  batchResults: OsvQueryBatchResponse['results'],
-  severityMap: Map<string, keyof SeverityBuckets> | undefined
-): CveDepsAggregate {
-  let vulnerablePackages = 0;
-  let totalVulnerabilities = 0;
-  const severity = severityMap ? emptySeverity() : undefined;
-  const seenVulnIds = new Set<string>();
-
+  batchResults: OsvQueryBatchResponse['results']
+): CvePackageSignal[] {
+  const packages: CvePackageSignal[] = [];
   for (let i = 0; i < deps.length; i++) {
-    const row = batchResults[i];
-    const vulns = row?.vulns ?? [];
+    const vulns = batchResults[i]?.vulns ?? [];
     if (vulns.length === 0) continue;
-    vulnerablePackages++;
-    totalVulnerabilities += vulns.length;
+    const d = deps[i]!;
+    packages.push({
+      name: d.name,
+      version: d.version,
+      vulnerabilities: vulns.map((v) => ({ id: v.id })),
+    });
+  }
+  return packages;
+}
 
-    if (severityMap && severity) {
-      for (const v of vulns) {
-        if (seenVulnIds.has(v.id)) continue;
-        seenVulnIds.add(v.id);
-        const bucket = severityMap.get(v.id) ?? 'unknown';
-        severity[bucket]++;
+function totalVulnCount(packages: CvePackageSignal[]): number {
+  return packages.reduce((acc, p) => acc + p.vulnerabilities.length, 0);
+}
+
+function enrichPackagesWithMetadata(
+  packages: CvePackageSignal[],
+  meta: Map<string, { severity: keyof SeverityBuckets; description?: string }>
+): void {
+  for (const pkg of packages) {
+    for (const vuln of pkg.vulnerabilities) {
+      const m = meta.get(vuln.id);
+      if (!m) {
+        vuln.severity = 'unknown';
+        continue;
       }
+      vuln.severity = m.severity;
+      if (m.description !== undefined) vuln.description = m.description;
     }
   }
+}
 
-  return {
-    vulnerablePackages,
-    totalVulnerabilities,
-    ...(severity ? { severity } : {}),
-  };
+/** Instance-based counts (same id in two packages counts twice). Omits zero buckets. */
+export function sparseSeverityInstanceCounts(packages: CvePackageSignal[]): Partial<SeverityBuckets> | undefined {
+  const counts = emptySeverity();
+  for (const pkg of packages) {
+    for (const vuln of pkg.vulnerabilities) {
+      const label = vuln.severity ?? 'unknown';
+      counts[label]++;
+    }
+  }
+  const out: Partial<SeverityBuckets> = {};
+  for (const k of ['critical', 'high', 'moderate', 'low', 'unknown'] as const) {
+    if (counts[k] > 0) out[k] = counts[k];
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export async function computeCveAggregates(
@@ -239,23 +302,36 @@ export async function computeCveAggregates(
   const prodDeps = prodIdx.map((i) => dependencies[i]!);
   const devDeps = devIdx.map((i) => dependencies[i]!);
 
-  let prodSeverityMap: Map<string, keyof SeverityBuckets> | undefined;
-  let devSeverityMap: Map<string, keyof SeverityBuckets> | undefined;
+  const prodPackages = packagesFromBatchResults(prodDeps, prodResults);
+  const devPackages = packagesFromBatchResults(devDeps, devResults);
+
+  let prodSeverity: Partial<SeverityBuckets> | undefined;
+  let devSeverity: Partial<SeverityBuckets> | undefined;
 
   if (options.detail) {
-    const prodIds = prodResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
-    const devIds = devResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
-    const [prodMap, devMap] = await Promise.all([
-      prodIds.length ? fetchVulnDetailsParallel(prodIds) : Promise.resolve(new Map()),
-      devIds.length ? fetchVulnDetailsParallel(devIds) : Promise.resolve(new Map()),
+    const prodIds = prodPackages.flatMap((p) => p.vulnerabilities.map((v) => v.id));
+    const devIds = devPackages.flatMap((p) => p.vulnerabilities.map((v) => v.id));
+    const [prodMeta, devMeta] = await Promise.all([
+      prodIds.length ? fetchVulnMetadataParallel(prodIds) : Promise.resolve(new Map()),
+      devIds.length ? fetchVulnMetadataParallel(devIds) : Promise.resolve(new Map()),
     ]);
-    prodSeverityMap = prodMap;
-    devSeverityMap = devMap;
+    enrichPackagesWithMetadata(prodPackages, prodMeta);
+    enrichPackagesWithMetadata(devPackages, devMeta);
+    prodSeverity = sparseSeverityInstanceCounts(prodPackages);
+    devSeverity = sparseSeverityInstanceCounts(devPackages);
   }
 
   return {
     lockfileType,
-    prod: aggregateFromBatch(prodDeps, prodResults, prodSeverityMap),
-    dev: aggregateFromBatch(devDeps, devResults, devSeverityMap),
+    prod: {
+      totalVulnerabilities: totalVulnCount(prodPackages),
+      packages: prodPackages,
+      ...(prodSeverity ? { severity: prodSeverity } : {}),
+    },
+    dev: {
+      totalVulnerabilities: totalVulnCount(devPackages),
+      packages: devPackages,
+      ...(devSeverity ? { severity: devSeverity } : {}),
+    },
   };
 }

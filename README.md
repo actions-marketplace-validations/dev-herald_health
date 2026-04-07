@@ -64,11 +64,15 @@ Knip is just one example - Dev Herald is designed to support multiple signals ov
 | Input | Description |
 | ----- | ----------- |
 | `api-key` | Required. Project API key |
-| `knip-report-path` | Path to a single report file |
+| `knip-report-path` | Path to a Knip JSON report (optional if a supported lockfile is present for CVEs) |
+| `lockfile-path` | Optional path to `package-lock.json` or `pnpm-lock.yaml`; otherwise auto-detect under repo root |
+| `cve-detail` | If `true`, enrich each vulnerability with OSV severity, description text, and aggregate severity counts (slower). If `false`, still sends vulnerable **package names** and OSV ids only |
 | `api-url` | Defaults to Dev Herald ingest API |
 | `repository-full-name` | Optional override |
 | `commit-sha` | Optional override |
 | `workflow-run-url` | Link to CI run |
+
+When CVE scanning runs (npm or pnpm lockfile), the ingest payload includes `signals.cve` with `prod` / `dev` sections: `totalVulnerabilities`, a `packages` list (`name`, `version`, `vulnerabilities[]` with at least `id`), and optionally `severity` summary counts when `cve-detail` is enabled.
 
 ### Outputs
 

@@ -76,7 +76,7 @@ async function run(): Promise<void> {
         core.info(`Lockfile ${detected.type}: ${detected.path} (${deps.length} packages)`);
         cveAgg = await computeCveAggregates(detected.type, deps, { detail: v.cveDetail });
         core.info(
-          `CVE: prod vulnerablePackages=${cveAgg.prod.vulnerablePackages} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.vulnerablePackages} totalVulns=${cveAgg.dev.totalVulnerabilities}`
+          `CVE: prod vulnerablePackages=${cveAgg.prod.packages.length} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.packages.length} totalVulns=${cveAgg.dev.totalVulnerabilities}`
         );
       }
     } catch (e) {

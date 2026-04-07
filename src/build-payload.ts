@@ -15,13 +15,13 @@ function cveToPayloadShape(c: CveAggregates): NonNullable<HealthIngestRequest['s
   return {
     lockfileType: c.lockfileType,
     prod: {
-      vulnerablePackages: c.prod.vulnerablePackages,
       totalVulnerabilities: c.prod.totalVulnerabilities,
+      packages: c.prod.packages,
       ...(c.prod.severity ? { severity: c.prod.severity } : {}),
     },
     dev: {
-      vulnerablePackages: c.dev.vulnerablePackages,
       totalVulnerabilities: c.dev.totalVulnerabilities,
+      packages: c.dev.packages,
       ...(c.dev.severity ? { severity: c.dev.severity } : {}),
     },
   };

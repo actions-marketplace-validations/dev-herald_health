@@ -20,7 +20,7 @@ inputs:
     default: ''
 
   cve-detail:
-    description: 'If true, fetch per-vulnerability details from OSV for severity breakdown (slower). Default: totals only.'
+    description: 'If true, fetch per-vulnerability details from OSV for per-issue severity and descriptions plus aggregate severity buckets (slower). If false, still sends vulnerable package names and OSV ids, without severities or descriptions.'
     required: false
     default: 'false'
 

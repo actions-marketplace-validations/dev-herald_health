@@ -34,6 +34,8 @@ export const osvVulnSeveritySchema = z
 export const osvVulnDetailSchema = z
   .object({
     id: z.string(),
+    summary: z.string().optional(),
+    details: z.string().optional(),
     severity: z.array(osvVulnSeveritySchema).optional(),
     database_specific: z.record(z.string(), z.any()).optional(),
   })

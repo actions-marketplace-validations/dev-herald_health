@@ -22,11 +22,21 @@ describe('buildHealthIngestPayload', () => {
     const p = buildHealthIngestPayload({
       cve: {
         lockfileType: 'pnpm',
-        prod: { vulnerablePackages: 0, totalVulnerabilities: 0 },
-        dev: { vulnerablePackages: 1, totalVulnerabilities: 2 },
+        prod: { totalVulnerabilities: 0, packages: [] },
+        dev: {
+          totalVulnerabilities: 2,
+          packages: [
+            {
+              name: 'x',
+              version: '1.0.0',
+              vulnerabilities: [{ id: 'A' }, { id: 'B' }],
+            },
+          ],
+        },
       },
     });
     expect(p.signals.cve?.dev.totalVulnerabilities).toBe(2);
+    expect(p.signals.cve?.dev.packages).toHaveLength(1);
     expect(p.signals.unusedCode).toBeUndefined();
   });
 });

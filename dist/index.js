@@ -30027,13 +30027,13 @@ function cveToPayloadShape(c) {
     return {
         lockfileType: c.lockfileType,
         prod: {
-            vulnerablePackages: c.prod.vulnerablePackages,
             totalVulnerabilities: c.prod.totalVulnerabilities,
+            packages: c.prod.packages,
             ...(c.prod.severity ? { severity: c.prod.severity } : {}),
         },
         dev: {
-            vulnerablePackages: c.dev.vulnerablePackages,
             totalVulnerabilities: c.dev.totalVulnerabilities,
+            packages: c.dev.packages,
             ...(c.dev.severity ? { severity: c.dev.severity } : {}),
         },
     };
@@ -30470,7 +30470,7 @@ async function run() {
                 const deps = (0, parse_lockfile_1.parseLockfile)(detected.type, detected.path);
                 core.info(`Lockfile ${detected.type}: ${detected.path} (${deps.length} packages)`);
                 cveAgg = await (0, cve_1.computeCveAggregates)(detected.type, deps, { detail: v.cveDetail });
-                core.info(`CVE: prod vulnerablePackages=${cveAgg.prod.vulnerablePackages} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.vulnerablePackages} totalVulns=${cveAgg.dev.totalVulnerabilities}`);
+                core.info(`CVE: prod vulnerablePackages=${cveAgg.prod.packages.length} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.packages.length} totalVulns=${cveAgg.dev.totalVulnerabilities}`);
             }
         }
         catch (e) {
@@ -30639,6 +30639,8 @@ exports.osvVulnSeveritySchema = zod_1.z
 exports.osvVulnDetailSchema = zod_1.z
     .object({
     id: zod_1.z.string(),
+    summary: zod_1.z.string().optional(),
+    details: zod_1.z.string().optional(),
     severity: zod_1.z.array(exports.osvVulnSeveritySchema).optional(),
     database_specific: zod_1.z.record(zod_1.z.string(), zod_1.z.any()).optional(),
 })
@@ -30653,7 +30655,7 @@ exports.osvVulnDetailSchema = zod_1.z
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.healthIngestRequestSchema = exports.healthSignalsSchema = exports.cveSignalsSchema = exports.cveDepsSignalSchema = exports.cveSeverityBucketsSchema = exports.unusedCodeSchema = void 0;
+exports.healthIngestRequestSchema = exports.healthSignalsSchema = exports.cveSignalsSchema = exports.cveEnvSignalSchema = exports.cvePackageSchema = exports.cveVulnerabilitySchema = exports.cveVulnSeverityLabelSchema = exports.cveEnvSeverityPartialSchema = exports.cveSeverityBucketsSchema = exports.unusedCodeSchema = void 0;
 const zod_1 = __nccwpck_require__(7151);
 exports.unusedCodeSchema = zod_1.z.object({
     unusedDepsList: zod_1.z.array(zod_1.z.string()),
@@ -30667,18 +30669,35 @@ exports.cveSeverityBucketsSchema = zod_1.z.object({
     low: zod_1.z.number().int().min(0),
     unknown: zod_1.z.number().int().min(0),
 });
-exports.cveDepsSignalSchema = zod_1.z
-    .object({
-    vulnerablePackages: zod_1.z.number().int().min(0),
+/** Aggregate counts: only non-zero buckets need to be present. */
+exports.cveEnvSeverityPartialSchema = exports.cveSeverityBucketsSchema.partial();
+exports.cveVulnSeverityLabelSchema = zod_1.z.enum([
+    'critical',
+    'high',
+    'moderate',
+    'low',
+    'unknown',
+]);
+exports.cveVulnerabilitySchema = zod_1.z.object({
+    id: zod_1.z.string().min(1),
+    severity: exports.cveVulnSeverityLabelSchema.optional(),
+    description: zod_1.z.string().optional(),
+});
+exports.cvePackageSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1),
+    version: zod_1.z.string().min(1),
+    vulnerabilities: zod_1.z.array(exports.cveVulnerabilitySchema),
+});
+exports.cveEnvSignalSchema = zod_1.z.object({
     totalVulnerabilities: zod_1.z.number().int().min(0),
-    severity: exports.cveSeverityBucketsSchema.optional(),
-})
-    .passthrough();
+    severity: exports.cveEnvSeverityPartialSchema.optional(),
+    packages: zod_1.z.array(exports.cvePackageSchema),
+});
 exports.cveSignalsSchema = zod_1.z
     .object({
     lockfileType: zod_1.z.string().min(1),
-    prod: exports.cveDepsSignalSchema,
-    dev: exports.cveDepsSignalSchema,
+    prod: exports.cveEnvSignalSchema,
+    dev: exports.cveEnvSignalSchema,
 })
     .passthrough();
 exports.healthSignalsSchema = zod_1.z
@@ -30785,10 +30804,13 @@ exports.knipReportSchema = zod_1.z
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.OSV_QUERY_BATCH_URL = void 0;
 exports.bucketizeScore = bucketizeScore;
+exports.packagesFromBatchResults = packagesFromBatchResults;
+exports.sparseSeverityInstanceCounts = sparseSeverityInstanceCounts;
 exports.computeCveAggregates = computeCveAggregates;
 const api_1 = __nccwpck_require__(7822);
 const cve_1 = __nccwpck_require__(7110);
 exports.OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
+const DESCRIPTION_FALLBACK_MAX = 400;
 const BATCH_SIZE = 500;
 const DETAIL_CONCURRENCY = 10;
 const emptySeverity = () => ({
@@ -30815,11 +30837,7 @@ function bucketizeScore(score) {
         return 'low';
     return 'unknown';
 }
-function severityFromDetail(detail) {
-    const parsed = cve_1.osvVulnDetailSchema.safeParse(detail);
-    if (!parsed.success)
-        return 'unknown';
-    const d = parsed.data;
+function severityFromParsedDetail(d) {
     let best;
     if (Array.isArray(d.severity)) {
         for (const s of d.severity) {
@@ -30846,6 +30864,34 @@ function severityFromDetail(detail) {
     if (best === undefined)
         return 'unknown';
     return bucketizeScore(best);
+}
+function descriptionFromParsedDetail(d) {
+    if (typeof d.summary === 'string') {
+        const t = d.summary.trim();
+        if (t.length > 0)
+            return t;
+    }
+    if (typeof d.details === 'string') {
+        const trimmed = d.details.trim();
+        if (!trimmed)
+            return undefined;
+        const firstBlock = trimmed.split(/\n\n+/)[0]?.trim() ?? '';
+        if (!firstBlock)
+            return undefined;
+        return firstBlock.length > DESCRIPTION_FALLBACK_MAX
+            ? firstBlock.slice(0, DESCRIPTION_FALLBACK_MAX)
+            : firstBlock;
+    }
+    return undefined;
+}
+function metadataFromDetail(detail) {
+    const parsed = cve_1.osvVulnDetailSchema.safeParse(detail);
+    if (!parsed.success)
+        return { severity: 'unknown' };
+    const d = parsed.data;
+    const severity = severityFromParsedDetail(d);
+    const description = descriptionFromParsedDetail(d);
+    return description !== undefined ? { severity, description } : { severity };
 }
 async function osvQueryBatchAll(queries) {
     const allResults = [];
@@ -30895,7 +30941,7 @@ async function osvQueryBatchAll(queries) {
     }
     return allResults;
 }
-async function fetchVulnDetailsParallel(ids) {
+async function fetchVulnMetadataParallel(ids) {
     const unique = [...new Set(ids)];
     const out = new Map();
     let idx = 0;
@@ -30912,14 +30958,14 @@ async function fetchVulnDetailsParallel(ids) {
             if (res.statusCode >= 200 && res.statusCode < 300) {
                 try {
                     const json = JSON.parse(res.data);
-                    out.set(id, severityFromDetail(json));
+                    out.set(id, metadataFromDetail(json));
                 }
                 catch {
-                    out.set(id, 'unknown');
+                    out.set(id, { severity: 'unknown' });
                 }
             }
             else {
-                out.set(id, 'unknown');
+                out.set(id, { severity: 'unknown' });
             }
         }
     }
@@ -30927,33 +30973,53 @@ async function fetchVulnDetailsParallel(ids) {
     await Promise.all(workers);
     return out;
 }
-function aggregateFromBatch(deps, batchResults, severityMap) {
-    let vulnerablePackages = 0;
-    let totalVulnerabilities = 0;
-    const severity = severityMap ? emptySeverity() : undefined;
-    const seenVulnIds = new Set();
+function packagesFromBatchResults(deps, batchResults) {
+    const packages = [];
     for (let i = 0; i < deps.length; i++) {
-        const row = batchResults[i];
-        const vulns = row?.vulns ?? [];
+        const vulns = batchResults[i]?.vulns ?? [];
         if (vulns.length === 0)
             continue;
-        vulnerablePackages++;
-        totalVulnerabilities += vulns.length;
-        if (severityMap && severity) {
-            for (const v of vulns) {
-                if (seenVulnIds.has(v.id))
-                    continue;
-                seenVulnIds.add(v.id);
-                const bucket = severityMap.get(v.id) ?? 'unknown';
-                severity[bucket]++;
+        const d = deps[i];
+        packages.push({
+            name: d.name,
+            version: d.version,
+            vulnerabilities: vulns.map((v) => ({ id: v.id })),
+        });
+    }
+    return packages;
+}
+function totalVulnCount(packages) {
+    return packages.reduce((acc, p) => acc + p.vulnerabilities.length, 0);
+}
+function enrichPackagesWithMetadata(packages, meta) {
+    for (const pkg of packages) {
+        for (const vuln of pkg.vulnerabilities) {
+            const m = meta.get(vuln.id);
+            if (!m) {
+                vuln.severity = 'unknown';
+                continue;
             }
+            vuln.severity = m.severity;
+            if (m.description !== undefined)
+                vuln.description = m.description;
         }
     }
-    return {
-        vulnerablePackages,
-        totalVulnerabilities,
-        ...(severity ? { severity } : {}),
-    };
+}
+/** Instance-based counts (same id in two packages counts twice). Omits zero buckets. */
+function sparseSeverityInstanceCounts(packages) {
+    const counts = emptySeverity();
+    for (const pkg of packages) {
+        for (const vuln of pkg.vulnerabilities) {
+            const label = vuln.severity ?? 'unknown';
+            counts[label]++;
+        }
+    }
+    const out = {};
+    for (const k of ['critical', 'high', 'moderate', 'low', 'unknown']) {
+        if (counts[k] > 0)
+            out[k] = counts[k];
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
 }
 async function computeCveAggregates(lockfileType, dependencies, options) {
     const prodIdx = [];
@@ -30969,22 +31035,34 @@ async function computeCveAggregates(lockfileType, dependencies, options) {
     const devResults = devIdx.map((_, j) => results[prodIdx.length + j]);
     const prodDeps = prodIdx.map((i) => dependencies[i]);
     const devDeps = devIdx.map((i) => dependencies[i]);
-    let prodSeverityMap;
-    let devSeverityMap;
+    const prodPackages = packagesFromBatchResults(prodDeps, prodResults);
+    const devPackages = packagesFromBatchResults(devDeps, devResults);
+    let prodSeverity;
+    let devSeverity;
     if (options.detail) {
-        const prodIds = prodResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
-        const devIds = devResults.flatMap((r) => r.vulns?.map((v) => v.id) ?? []);
-        const [prodMap, devMap] = await Promise.all([
-            prodIds.length ? fetchVulnDetailsParallel(prodIds) : Promise.resolve(new Map()),
-            devIds.length ? fetchVulnDetailsParallel(devIds) : Promise.resolve(new Map()),
+        const prodIds = prodPackages.flatMap((p) => p.vulnerabilities.map((v) => v.id));
+        const devIds = devPackages.flatMap((p) => p.vulnerabilities.map((v) => v.id));
+        const [prodMeta, devMeta] = await Promise.all([
+            prodIds.length ? fetchVulnMetadataParallel(prodIds) : Promise.resolve(new Map()),
+            devIds.length ? fetchVulnMetadataParallel(devIds) : Promise.resolve(new Map()),
         ]);
-        prodSeverityMap = prodMap;
-        devSeverityMap = devMap;
+        enrichPackagesWithMetadata(prodPackages, prodMeta);
+        enrichPackagesWithMetadata(devPackages, devMeta);
+        prodSeverity = sparseSeverityInstanceCounts(prodPackages);
+        devSeverity = sparseSeverityInstanceCounts(devPackages);
     }
     return {
         lockfileType,
-        prod: aggregateFromBatch(prodDeps, prodResults, prodSeverityMap),
-        dev: aggregateFromBatch(devDeps, devResults, devSeverityMap),
+        prod: {
+            totalVulnerabilities: totalVulnCount(prodPackages),
+            packages: prodPackages,
+            ...(prodSeverity ? { severity: prodSeverity } : {}),
+        },
+        dev: {
+            totalVulnerabilities: totalVulnCount(devPackages),
+            packages: devPackages,
+            ...(devSeverity ? { severity: devSeverity } : {}),
+        },
     };
 }
 

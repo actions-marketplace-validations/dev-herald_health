@@ -14,19 +14,40 @@ export const cveSeverityBucketsSchema = z.object({
   unknown: z.number().int().min(0),
 });
 
-export const cveDepsSignalSchema = z
-  .object({
-    vulnerablePackages: z.number().int().min(0),
-    totalVulnerabilities: z.number().int().min(0),
-    severity: cveSeverityBucketsSchema.optional(),
-  })
-  .passthrough();
+/** Aggregate counts: only non-zero buckets need to be present. */
+export const cveEnvSeverityPartialSchema = cveSeverityBucketsSchema.partial();
+
+export const cveVulnSeverityLabelSchema = z.enum([
+  'critical',
+  'high',
+  'moderate',
+  'low',
+  'unknown',
+]);
+
+export const cveVulnerabilitySchema = z.object({
+  id: z.string().min(1),
+  severity: cveVulnSeverityLabelSchema.optional(),
+  description: z.string().optional(),
+});
+
+export const cvePackageSchema = z.object({
+  name: z.string().min(1),
+  version: z.string().min(1),
+  vulnerabilities: z.array(cveVulnerabilitySchema),
+});
+
+export const cveEnvSignalSchema = z.object({
+  totalVulnerabilities: z.number().int().min(0),
+  severity: cveEnvSeverityPartialSchema.optional(),
+  packages: z.array(cvePackageSchema),
+});
 
 export const cveSignalsSchema = z
   .object({
     lockfileType: z.string().min(1),
-    prod: cveDepsSignalSchema,
-    dev: cveDepsSignalSchema,
+    prod: cveEnvSignalSchema,
+    dev: cveEnvSignalSchema,
   })
   .passthrough();
 

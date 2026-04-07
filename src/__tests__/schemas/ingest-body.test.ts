@@ -22,8 +22,8 @@ describe('healthIngestRequestSchema', () => {
       signals: {
         cve: {
           lockfileType: 'pnpm',
-          prod: { vulnerablePackages: 0, totalVulnerabilities: 0 },
-          dev: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+          prod: { totalVulnerabilities: 0, packages: [] },
+          dev: { totalVulnerabilities: 0, packages: [] },
         },
       },
     };
@@ -37,8 +37,8 @@ describe('healthIngestRequestSchema', () => {
         unusedCode: emptyUnusedCode,
         cve: {
           lockfileType: 'npm',
-          prod: { vulnerablePackages: 0, totalVulnerabilities: 0 },
-          dev: { vulnerablePackages: 0, totalVulnerabilities: 0 },
+          prod: { totalVulnerabilities: 0, packages: [] },
+          dev: { totalVulnerabilities: 0, packages: [] },
         },
       },
     };
@@ -65,6 +65,30 @@ describe('healthIngestRequestSchema', () => {
       signals: { unusedCode: emptyUnusedCode },
     };
     expect(healthIngestRequestSchema.safeParse(raw).success).toBe(false);
+  });
+
+  it('accepts cve with partial severity buckets and vulnerability metadata', () => {
+    const raw = {
+      timestamp: new Date().toISOString(),
+      signals: {
+        cve: {
+          lockfileType: 'pnpm',
+          prod: {
+            totalVulnerabilities: 1,
+            severity: { critical: 1 },
+            packages: [
+              {
+                name: 'pkg',
+                version: '1.0.0',
+                vulnerabilities: [{ id: 'GHSA-abc', severity: 'critical', description: 'test' }],
+              },
+            ],
+          },
+          dev: { totalVulnerabilities: 0, packages: [] },
+        },
+      },
+    };
+    expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
   });
 
   it('rejects missing both unusedCode and cve', () => {
