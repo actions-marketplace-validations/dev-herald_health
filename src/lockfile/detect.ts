@@ -1,42 +1,50 @@
 import { existsSync } from 'fs';
-import { join, resolve } from 'path';
-import type { DetectedLockfile, LockfileType } from './types';
+import { dirname, join, resolve } from 'path';
+import type { DetectedEcosystem, EcosystemAdapter } from './adapter';
+import { bunAdapter } from './adapters/bun';
+import { npmAdapter } from './adapters/npm';
+import { pnpmAdapter } from './adapters/pnpm';
+import { yarnAdapter } from './adapters/yarn';
 
-const PRIORITY: Array<{ file: string; type: LockfileType }> = [
-  { file: 'pnpm-lock.yaml', type: 'pnpm' },
-  { file: 'yarn.lock', type: 'yarn' },
-  { file: 'package-lock.json', type: 'npm' },
-  { file: 'bun.lock', type: 'bun' },
+const PRIORITY: Array<{ file: string; adapter: EcosystemAdapter }> = [
+  { file: 'pnpm-lock.yaml', adapter: pnpmAdapter },
+  { file: 'yarn.lock', adapter: yarnAdapter },
+  { file: 'package-lock.json', adapter: npmAdapter },
+  { file: 'bun.lock', adapter: bunAdapter },
 ];
 
-export function inferLockfileTypeFromFilename(filename: string): LockfileType | undefined {
+const ADAPTER_BY_FILENAME = new Map(PRIORITY.map((p) => [p.file.toLowerCase(), p.adapter] as const));
+
+export function inferPmNameFromFilename(filename: string): string | undefined {
   const base = filename.split(/[/\\]/).pop()?.toLowerCase() ?? '';
-  if (base === 'pnpm-lock.yaml') return 'pnpm';
-  if (base === 'yarn.lock') return 'yarn';
-  if (base === 'package-lock.json') return 'npm';
-  if (base === 'bun.lock') return 'bun';
-  return undefined;
+  return ADAPTER_BY_FILENAME.get(base)?.pmName;
 }
 
-export function detectLockfile(workspaceRoot: string, overridePath?: string): DetectedLockfile {
+/** @deprecated Use {@link inferPmNameFromFilename} */
+export function inferLockfileTypeFromFilename(filename: string): string | undefined {
+  return inferPmNameFromFilename(filename);
+}
+
+export function detectAdapter(workspaceRoot: string, overridePath?: string): DetectedEcosystem {
   if (overridePath !== undefined && overridePath.trim().length > 0) {
     const full = resolve(overridePath.trim());
     if (!existsSync(full)) {
       throw new Error(`lockfile-path not found: ${full}`);
     }
-    const inferred = inferLockfileTypeFromFilename(full);
-    if (!inferred) {
+    const base = full.split(/[/\\]/).pop()?.toLowerCase() ?? '';
+    const adapter = ADAPTER_BY_FILENAME.get(base);
+    if (!adapter) {
       throw new Error(
         `Could not infer lockfile type from filename; use pnpm-lock.yaml, yarn.lock, package-lock.json, or bun.lock`
       );
     }
-    return { type: inferred, path: full };
+    return { adapter, lockfileDir: dirname(full), lockfilePath: full };
   }
 
-  for (const { file, type } of PRIORITY) {
+  for (const { file, adapter } of PRIORITY) {
     const full = join(workspaceRoot, file);
     if (existsSync(full)) {
-      return { type, path: full };
+      return { adapter, lockfileDir: dirname(full), lockfilePath: full };
     }
   }
 

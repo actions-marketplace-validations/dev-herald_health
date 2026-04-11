@@ -2,8 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { buildHeaders, makeHttpRequest } from './api';
 import { buildHealthIngestPayload } from './build-payload';
-import { detectLockfile } from './lockfile/detect';
-import { parseLockfile } from './lockfile/parse-lockfile';
+import { detectAdapter } from './lockfile/detect';
 import { actionInputsSchema } from './schemas/inputs';
 import { computeCveAggregates } from './signals/cve';
 import { mapKnipReportToSignals } from './signals/knip';
@@ -66,15 +65,19 @@ async function run(): Promise<void> {
     const lockOverride = v.lockfilePath.length > 0 ? v.lockfilePath : undefined;
 
     try {
-      const detected = detectLockfile(workspaceRoot, lockOverride);
-      if (detected.type === 'yarn' || detected.type === 'bun') {
+      const detected = detectAdapter(workspaceRoot, lockOverride);
+      if (!detected.adapter.supported) {
         core.warning(
-          `CVE scanning supports npm and pnpm lockfiles only; detected ${detected.type} at ${detected.path}. Skipping OSV. Add pnpm-lock.yaml or package-lock.json, or set lockfile-path to one of those.`
+          `CVE scanning does not support ${detected.adapter.pmName} yet; lockfile at ${detected.lockfilePath}. Skipping OSV. Use pnpm-lock.yaml or package-lock.json, or set lockfile-path to one of those.`
         );
       } else {
-        const deps = parseLockfile(detected.type, detected.path);
-        core.info(`Lockfile ${detected.type}: ${detected.path} (${deps.length} packages)`);
-        cveAgg = await computeCveAggregates(detected.type, deps, { detail: v.cveDetail });
+        const deps = await detected.adapter.listDeps(detected.lockfileDir, detected.lockfilePath);
+        core.info(`${detected.adapter.pmName}: ${detected.lockfilePath} (${deps.length} packages)`);
+        cveAgg = await computeCveAggregates(deps, {
+          detail: v.cveDetail,
+          pmName: detected.adapter.pmName,
+          osvEcosystem: detected.adapter.osvEcosystem,
+        });
         core.info(
           `CVE: prod vulnerablePackages=${cveAgg.prod.packages.length} totalVulns=${cveAgg.prod.totalVulnerabilities}; dev vulnerablePackages=${cveAgg.dev.packages.length} totalVulns=${cveAgg.dev.totalVulnerabilities}`
         );

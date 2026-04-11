@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { makeHttpRequest } from '../api';
 import { osvQueryBatchResponseSchema, osvVulnDetailSchema, type OsvQueryBatchResponse } from '../schemas/cve';
 import type { Dependency } from '../lockfile/types';
-import type { LockfileType } from '../lockfile/types';
 
 export const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
 
@@ -37,7 +36,8 @@ export interface CveEnvSignal {
 }
 
 export interface CveAggregates {
-  lockfileType: LockfileType;
+  /** Package manager id (e.g. pnpm, npm); ingest field name remains `lockfileType` for compatibility. */
+  lockfileType: string;
   prod: CveEnvSignal;
   dev: CveEnvSignal;
 }
@@ -279,9 +279,8 @@ export function sparseSeverityInstanceCounts(packages: CvePackageSignal[]): Part
 }
 
 export async function computeCveAggregates(
-  lockfileType: LockfileType,
   dependencies: Dependency[],
-  options: { detail: boolean }
+  options: { detail: boolean; pmName: string; osvEcosystem: string }
 ): Promise<CveAggregates> {
   const prodIdx: number[] = [];
   const devIdx: number[] = [];
@@ -290,7 +289,7 @@ export async function computeCveAggregates(
   const orderedDeps = [...prodIdx.map((i) => dependencies[i]!), ...devIdx.map((i) => dependencies[i]!)];
 
   const queries = orderedDeps.map((d) => ({
-    package: { name: d.name, ecosystem: 'npm' },
+    package: { name: d.name, ecosystem: options.osvEcosystem },
     version: d.version,
   }));
 
@@ -322,7 +321,7 @@ export async function computeCveAggregates(
   }
 
   return {
-    lockfileType,
+    lockfileType: options.pmName,
     prod: {
       totalVulnerabilities: totalVulnCount(prodPackages),
       packages: prodPackages,
