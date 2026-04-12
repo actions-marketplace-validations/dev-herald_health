@@ -91,7 +91,22 @@ describe('healthIngestRequestSchema', () => {
     expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
   });
 
-  it('rejects missing both unusedCode and cve', () => {
+  it('accepts bundle only', () => {
+    const raw = {
+      timestamp: new Date().toISOString(),
+      signals: {
+        bundle: {
+          totalBytes: 1,
+          jsBytes: 1,
+          cssBytes: 0,
+          routes: [{ path: '/', totalBytes: 1 }],
+        },
+      },
+    };
+    expect(healthIngestRequestSchema.safeParse(raw).success).toBe(true);
+  });
+
+  it('rejects missing unusedCode, cve, and bundle', () => {
     const raw = {
       timestamp: new Date().toISOString(),
       signals: {},

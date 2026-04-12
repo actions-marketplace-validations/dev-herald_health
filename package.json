@@ -4,8 +4,9 @@
   "description": "GitHub Action: Knip JSON → Dev Herald health ingest API",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc --noEmit",
-    "package": "pnpm run build && ncc build src/main.ts -o dist --source-map --license licenses.txt",
+    "typecheck": "tsc --noEmit",
+    "build": "turbo run build",
+    "package": "pnpm run typecheck && ncc build src/main.ts -o dist --source-map --license licenses.txt",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@vercel/ncc": "^0.38.1",
+    "turbo": "^2.5.4",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"
   },

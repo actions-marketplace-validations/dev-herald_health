@@ -1,10 +1,15 @@
-import { healthIngestRequestSchema, type HealthIngestRequest } from './schemas/ingest-body';
+import {
+  healthIngestRequestSchema,
+  type BundleSignal,
+  type HealthIngestRequest,
+} from './schemas/ingest-body';
 import type { CveAggregates } from './signals/cve';
 import type { KnipUnusedCodeLists } from './signals/knip';
 
 export interface BuildPayloadOptions {
   unusedCode?: KnipUnusedCodeLists;
   cve?: CveAggregates;
+  bundle?: BundleSignal;
   repositoryFullName?: string;
   commitSha?: string;
   workflowRunUrl?: string;
@@ -28,13 +33,14 @@ function cveToPayloadShape(c: CveAggregates): NonNullable<HealthIngestRequest['s
 }
 
 export function buildHealthIngestPayload(options: BuildPayloadOptions): HealthIngestRequest {
-  if (!options.unusedCode && !options.cve) {
-    throw new Error('At least one of unusedCode (Knip) or cve signals is required');
+  if (!options.unusedCode && !options.cve && !options.bundle) {
+    throw new Error('At least one of unusedCode (Knip), cve, or bundle signals is required');
   }
 
   const signals: HealthIngestRequest['signals'] = {
     ...(options.unusedCode ? { unusedCode: options.unusedCode } : {}),
     ...(options.cve ? { cve: cveToPayloadShape(options.cve) } : {}),
+    ...(options.bundle ? { bundle: options.bundle } : {}),
   };
 
   const body: HealthIngestRequest = {

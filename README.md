@@ -71,8 +71,31 @@ Knip is just one example - Dev Herald is designed to support multiple signals ov
 | `repository-full-name` | Optional override |
 | `commit-sha` | Optional override |
 | `workflow-run-url` | Link to CI run |
+| `nextjs-bundle-stats-path` | Path to `.next/diagnostics/route-bundle-stats.json` after `TURBOPACK_STATS=1 next build` (Next.js 16.2+ Turbopack). Mutually exclusive with `bundle-data`. |
+| `bundle-data` | Pre-computed `signals.bundle` JSON string (escape hatch). Mutually exclusive with `nextjs-bundle-stats-path`. |
 
 When CVE scanning runs (npm or pnpm lockfile), the ingest payload includes `signals.cve` with `prod` / `dev` sections: `totalVulnerabilities`, a `packages` list (`name`, `version`, `vulnerabilities[]` with at least `id`), and optionally `severity` summary counts when `cve-detail` is enabled.
+
+### Next.js (Turbopack) bundle sizes
+
+Build with stats enabled, then point the action at the generated file:
+
+```yaml
+- name: Build
+  run: TURBOPACK_STATS=1 pnpm build
+
+- name: Upload health data
+  uses: dev-herald/health@v1
+  with:
+    api-key: ${{ secrets.DEV_HERALD_KEY }}
+    nextjs-bundle-stats-path: .next/diagnostics/route-bundle-stats.json
+```
+
+---
+
+## Monorepo (development)
+
+This repository is a pnpm workspace with a small Next.js app under `apps/nextjs` used to exercise Turbopack `route-bundle-stats.json` locally. From the repo root: `pnpm install`, then `cd apps/nextjs && TURBOPACK_STATS=1 pnpm build`.
 
 ### Outputs
 

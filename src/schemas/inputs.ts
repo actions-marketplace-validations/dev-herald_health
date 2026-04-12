@@ -30,6 +30,23 @@ export const actionInputsSchema = z.object({
   repositoryFullName: z.string().optional(),
   commitSha: z.string().optional(),
   workflowRunUrl: z.string().optional(),
-});
+  nextjsBundleStatsPath: z
+    .string()
+    .optional()
+    .default('')
+    .transform((s) => s.trim()),
+  bundleData: z
+    .string()
+    .optional()
+    .default('')
+    .transform((s) => s.trim()),
+})
+  .refine(
+    (d) => !(d.nextjsBundleStatsPath.length > 0 && d.bundleData.length > 0),
+    {
+      message: 'Provide only one of nextjs-bundle-stats-path or bundle-data, not both',
+      path: ['nextjsBundleStatsPath'],
+    }
+  );
 
 export type ActionInputsValidated = z.infer<typeof actionInputsSchema>;

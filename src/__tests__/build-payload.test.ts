@@ -18,6 +18,29 @@ describe('buildHealthIngestPayload', () => {
     expect(p.signals.cve).toBeUndefined();
   });
 
+  it('builds bundle-only', () => {
+    const p = buildHealthIngestPayload({
+      bundle: {
+        totalBytes: 300,
+        jsBytes: 300,
+        cssBytes: 0,
+        routes: [
+          {
+            path: '/',
+            totalBytes: 100,
+            uncompressedBytes: 100,
+            compressedBytes: 40,
+            moduleCount: 2,
+          },
+        ],
+      },
+    });
+    expect(p.signals.bundle?.routes).toHaveLength(1);
+    expect(p.signals.bundle?.jsBytes).toBe(300);
+    expect(p.signals.unusedCode).toBeUndefined();
+    expect(p.signals.cve).toBeUndefined();
+  });
+
   it('builds cve-only', () => {
     const p = buildHealthIngestPayload({
       cve: {

@@ -41,6 +41,16 @@ inputs:
     description: 'Link to the workflow run'
     required: false
 
+  nextjs-bundle-stats-path:
+    description: 'Path to .next/diagnostics/route-bundle-stats.json (set TURBOPACK_STATS=1 on your next build step)'
+    required: false
+    default: ''
+
+  bundle-data:
+    description: 'Pre-computed bundle signal JSON string (escape hatch for other bundlers)'
+    required: false
+    default: ''
+
 outputs:
   report-id:
     description: 'Health report ID'

@@ -1,12 +1,15 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import * as path from 'node:path';
 import { buildHeaders, makeHttpRequest } from './api';
 import { buildHealthIngestPayload } from './build-payload';
 import { detectAdapter } from './lockfile/detect';
+import { readAndValidateKnipReport } from './read-knip-files';
 import { actionInputsSchema } from './schemas/inputs';
+import { bundleSignalSchema, type BundleSignal } from './schemas/ingest-body';
+import { parseNextjsBundleStats } from './signals/bundle';
 import { computeCveAggregates } from './signals/cve';
 import { mapKnipReportToSignals } from './signals/knip';
-import { readAndValidateKnipReport } from './read-knip-files';
 import type { IngestSuccessData } from './types';
 
 const DEFAULT_API_URL = 'https://dev-herald.com/api/v1/health/ingest';
@@ -32,6 +35,8 @@ async function run(): Promise<void> {
       optionalString(core.getInput('commit-sha')) ??
       (typeof ctx.sha === 'string' && ctx.sha.length > 0 ? ctx.sha : undefined);
     const workflowRunUrl = optionalString(core.getInput('workflow-run-url'));
+    const nextjsBundleStatsPathRaw = core.getInput('nextjs-bundle-stats-path');
+    const bundleDataRaw = core.getInput('bundle-data');
 
     const inputsParsed = actionInputsSchema.safeParse({
       apiKey,
@@ -42,6 +47,8 @@ async function run(): Promise<void> {
       repositoryFullName,
       commitSha,
       workflowRunUrl,
+      nextjsBundleStatsPath: nextjsBundleStatsPathRaw,
+      bundleData: bundleDataRaw,
     });
 
     if (!inputsParsed.success) {
@@ -50,6 +57,42 @@ async function run(): Promise<void> {
     }
 
     const v = inputsParsed.data;
+    const workspaceRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
+
+    let bundle: BundleSignal | undefined;
+    if (v.nextjsBundleStatsPath.length > 0) {
+      const statsPath = path.isAbsolute(v.nextjsBundleStatsPath)
+        ? v.nextjsBundleStatsPath
+        : path.join(workspaceRoot, v.nextjsBundleStatsPath);
+      const parsed = parseNextjsBundleStats(statsPath);
+      const validated = bundleSignalSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new Error(
+          `Bundle stats produced invalid signal: ${validated.error.issues.map((i) => i.message).join('; ')}`
+        );
+      }
+      bundle = validated.data;
+      core.info(
+        `Bundle (Turbopack): routes=${bundle.routes.length} jsBytes=${bundle.jsBytes} cssBytes=${bundle.cssBytes} totalBytes=${bundle.totalBytes}`
+      );
+    } else if (v.bundleData.length > 0) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(v.bundleData) as unknown;
+      } catch {
+        throw new Error('bundle-data is not valid JSON');
+      }
+      const validated = bundleSignalSchema.safeParse(raw);
+      if (!validated.success) {
+        throw new Error(
+          `bundle-data validation failed: ${validated.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
+        );
+      }
+      bundle = validated.data;
+      core.info(
+        `Bundle (raw JSON): routes=${bundle.routes.length} jsBytes=${bundle.jsBytes} cssBytes=${bundle.cssBytes} totalBytes=${bundle.totalBytes}`
+      );
+    }
 
     let unusedCode;
     if (v.knipReportPath.length > 0) {
@@ -61,7 +104,6 @@ async function run(): Promise<void> {
     }
 
     let cveAgg;
-    const workspaceRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const lockOverride = v.lockfilePath.length > 0 ? v.lockfilePath : undefined;
 
     try {
@@ -89,15 +131,16 @@ async function run(): Promise<void> {
       core.info(`CVE scan skipped: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    if (!unusedCode && !cveAgg) {
+    if (!unusedCode && !cveAgg && !bundle) {
       throw new Error(
-        'No knip report path provided and no lockfile found. Provide knip-report-path and/or a supported lockfile at the repository root.'
+        'No signals to send. Provide knip-report-path, a supported lockfile for CVE scanning, nextjs-bundle-stats-path (after TURBOPACK_STATS=1 next build), and/or bundle-data.'
       );
     }
 
     const payload = buildHealthIngestPayload({
       unusedCode,
       cve: cveAgg,
+      bundle,
       repositoryFullName: v.repositoryFullName,
       commitSha: v.commitSha,
       workflowRunUrl: v.workflowRunUrl,

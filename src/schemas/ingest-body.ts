@@ -46,14 +46,33 @@ export const cveSignalsSchema = z
   })
   .passthrough();
 
+export const bundleRouteSchema = z.object({
+  path: z.string().min(1),
+  totalBytes: z.number().int().min(0),
+  uncompressedBytes: z.number().int().min(0).optional(),
+  compressedBytes: z.number().int().min(0).optional(),
+  moduleCount: z.number().int().min(0).optional(),
+});
+
+export const bundleSignalSchema = z.object({
+  totalBytes: z.number().int().min(0),
+  jsBytes: z.number().int().min(0),
+  cssBytes: z.number().int().min(0),
+  routes: z.array(bundleRouteSchema),
+});
+
+export type BundleRoute = z.infer<typeof bundleRouteSchema>;
+export type BundleSignal = z.infer<typeof bundleSignalSchema>;
+
 export const healthSignalsSchema = z
   .object({
     unusedCode: unusedCodeSchema.optional(),
     cve: cveSignalsSchema.optional(),
+    bundle: bundleSignalSchema.optional(),
   })
   .passthrough()
-  .refine((s) => s.unusedCode !== undefined || s.cve !== undefined, {
-    message: 'signals must include unusedCode (Knip) and/or cve',
+  .refine((s) => s.unusedCode !== undefined || s.cve !== undefined || s.bundle !== undefined, {
+    message: 'signals must include at least one of unusedCode (Knip), cve, or bundle',
   });
 
 export const healthIngestRequestSchema = z

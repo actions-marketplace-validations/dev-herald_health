@@ -1,0 +1,12 @@
+[
+  {
+    "route": "/",
+    "firstLoadUncompressedJsBytes": 100,
+    "firstLoadChunkPaths": [".next/static/chunks/shared.js", ".next/static/chunks/home.js"]
+  },
+  {
+    "route": "/dashboard",
+    "firstLoadUncompressedJsBytes": 200,
+    "firstLoadChunkPaths": [".next/static/chunks/shared.js", ".next/static/chunks/dash.js"]
+  }
+]
