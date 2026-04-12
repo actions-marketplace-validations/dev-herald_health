@@ -41,8 +41,8 @@ inputs:
     description: 'Link to the workflow run'
     required: false
 
-  nextjs-bundle-stats-path:
-    description: 'Path to .next/diagnostics/route-bundle-stats.json (set TURBOPACK_STATS=1 on your next build step)'
+  turbopack-bundle-stats-path:
+    description: 'Path to next experimental-analyze --output dir (.next/diagnostics/analyze) or to route-bundle-stats.json from a Turbopack build'
     required: false
     default: ''
 

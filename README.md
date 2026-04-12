@@ -42,7 +42,6 @@ Example - Upload a report
     workflow-run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 ```
 
-
 Example - Generating data (Knip)
 
 You can use tools like Knip to generate signals:
@@ -52,7 +51,6 @@ You can use tools like Knip to generate signals:
   run: pnpm exec knip --reporter json --no-exit-code > results.json
 ```
 
-
 Then upload the result using the action above.
 
 Knip is just one example - Dev Herald is designed to support multiple signals over time.
@@ -61,45 +59,27 @@ Knip is just one example - Dev Herald is designed to support multiple signals ov
 
 ### Inputs
 
-| Input | Description |
-| ----- | ----------- |
-| `api-key` | Required. Project API key |
-| `knip-report-path` | Path to a Knip JSON report (optional if a supported lockfile is present for CVEs) |
-| `lockfile-path` | Optional path to `package-lock.json` or `pnpm-lock.yaml`; otherwise auto-detect under repo root |
-| `cve-detail` | If `true`, enrich each vulnerability with OSV severity, description text, and aggregate severity counts (slower). If `false`, still sends vulnerable **package names** and OSV ids only |
-| `api-url` | Defaults to Dev Herald ingest API |
-| `repository-full-name` | Optional override |
-| `commit-sha` | Optional override |
-| `workflow-run-url` | Link to CI run |
-| `nextjs-bundle-stats-path` | Path to `.next/diagnostics/route-bundle-stats.json` after `TURBOPACK_STATS=1 next build` (Next.js 16.2+ Turbopack). Mutually exclusive with `bundle-data`. |
-| `bundle-data` | Pre-computed `signals.bundle` JSON string (escape hatch). Mutually exclusive with `nextjs-bundle-stats-path`. |
+
+| Input                  | Description                                                                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api-key`              | Required. Project API key                                                                                                                                                               |
+| `knip-report-path`     | Path to a Knip JSON report (optional if a supported lockfile is present for CVEs)                                                                                                       |
+| `lockfile-path`        | Optional path to `package-lock.json` or `pnpm-lock.yaml`; otherwise auto-detect under repo root                                                                                         |
+| `cve-detail`           | If `true`, enrich each vulnerability with OSV severity, description text, and aggregate severity counts (slower). If `false`, still sends vulnerable **package names** and OSV ids only |
+| `api-url`              | Defaults to Dev Herald ingest API                                                                                                                                                       |
+| `repository-full-name` | Optional override                                                                                                                                                                       |
+| `commit-sha`           | Optional override                                                                                                                                                                       |
+| `workflow-run-url`     | Link to CI run                                                                                                                                                                          |
+
 
 When CVE scanning runs (npm or pnpm lockfile), the ingest payload includes `signals.cve` with `prod` / `dev` sections: `totalVulnerabilities`, a `packages` list (`name`, `version`, `vulnerabilities[]` with at least `id`), and optionally `severity` summary counts when `cve-detail` is enabled.
 
-### Next.js (Turbopack) bundle sizes
-
-Build with stats enabled, then point the action at the generated file:
-
-```yaml
-- name: Build
-  run: TURBOPACK_STATS=1 pnpm build
-
-- name: Upload health data
-  uses: dev-herald/health@v1
-  with:
-    api-key: ${{ secrets.DEV_HERALD_KEY }}
-    nextjs-bundle-stats-path: .next/diagnostics/route-bundle-stats.json
-```
-
----
-
-## Monorepo (development)
-
-This repository is a pnpm workspace with a small Next.js app under `apps/nextjs` used to exercise Turbopack `route-bundle-stats.json` locally. From the repo root: `pnpm install`, then `cd apps/nextjs && TURBOPACK_STATS=1 pnpm build`.
-
 ### Outputs
 
-| Output | Description |
-| ------ | ----------- |
+
+| Output      | Description                 |
+| ----------- | --------------------------- |
 | `report-id` | Dev Herald health report id |
-| `status` | created or failed |
+| `status`    | created or failed           |
+
+

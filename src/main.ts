@@ -7,7 +7,7 @@ import { detectAdapter } from './lockfile/detect';
 import { readAndValidateKnipReport } from './read-knip-files';
 import { actionInputsSchema } from './schemas/inputs';
 import { bundleSignalSchema, type BundleSignal } from './schemas/ingest-body';
-import { parseNextjsBundleStats } from './signals/bundle';
+import { parseNextjsBundleInput } from './signals/bundle';
 import { computeCveAggregates } from './signals/cve';
 import { mapKnipReportToSignals } from './signals/knip';
 import type { IngestSuccessData } from './types';
@@ -35,7 +35,7 @@ async function run(): Promise<void> {
       optionalString(core.getInput('commit-sha')) ??
       (typeof ctx.sha === 'string' && ctx.sha.length > 0 ? ctx.sha : undefined);
     const workflowRunUrl = optionalString(core.getInput('workflow-run-url'));
-    const nextjsBundleStatsPathRaw = core.getInput('nextjs-bundle-stats-path');
+    const turbopackBundleStatsPathRaw = core.getInput('turbopack-bundle-stats-path');
     const bundleDataRaw = core.getInput('bundle-data');
 
     const inputsParsed = actionInputsSchema.safeParse({
@@ -47,7 +47,7 @@ async function run(): Promise<void> {
       repositoryFullName,
       commitSha,
       workflowRunUrl,
-      nextjsBundleStatsPath: nextjsBundleStatsPathRaw,
+      turbopackBundleStatsPath: turbopackBundleStatsPathRaw,
       bundleData: bundleDataRaw,
     });
 
@@ -60,11 +60,11 @@ async function run(): Promise<void> {
     const workspaceRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
 
     let bundle: BundleSignal | undefined;
-    if (v.nextjsBundleStatsPath.length > 0) {
-      const statsPath = path.isAbsolute(v.nextjsBundleStatsPath)
-        ? v.nextjsBundleStatsPath
-        : path.join(workspaceRoot, v.nextjsBundleStatsPath);
-      const parsed = parseNextjsBundleStats(statsPath);
+    if (v.turbopackBundleStatsPath.length > 0) {
+      const statsPath = path.isAbsolute(v.turbopackBundleStatsPath)
+        ? v.turbopackBundleStatsPath
+        : path.join(workspaceRoot, v.turbopackBundleStatsPath);
+      const parsed = parseNextjsBundleInput(statsPath);
       const validated = bundleSignalSchema.safeParse(parsed);
       if (!validated.success) {
         throw new Error(
@@ -73,7 +73,7 @@ async function run(): Promise<void> {
       }
       bundle = validated.data;
       core.info(
-        `Bundle (Turbopack): routes=${bundle.routes.length} jsBytes=${bundle.jsBytes} cssBytes=${bundle.cssBytes} totalBytes=${bundle.totalBytes}`
+        `Bundle (Next.js): routes=${bundle.routes.length} jsBytes=${bundle.jsBytes} cssBytes=${bundle.cssBytes} totalBytes=${bundle.totalBytes}`
       );
     } else if (v.bundleData.length > 0) {
       let raw: unknown;
@@ -133,7 +133,7 @@ async function run(): Promise<void> {
 
     if (!unusedCode && !cveAgg && !bundle) {
       throw new Error(
-        'No signals to send. Provide knip-report-path, a supported lockfile for CVE scanning, nextjs-bundle-stats-path (after TURBOPACK_STATS=1 next build), and/or bundle-data.'
+        'No signals to send. Provide knip-report-path, a supported lockfile for CVE scanning, turbopack-bundle-stats-path (experimental-analyze --output dir or route-bundle-stats.json), and/or bundle-data.'
       );
     }
 

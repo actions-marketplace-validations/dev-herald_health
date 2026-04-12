@@ -47,7 +47,7 @@ describe('actionInputsSchema', () => {
     const r = actionInputsSchema.safeParse({
       ...base,
       knipReportPath: '',
-      nextjsBundleStatsPath: '.next/diagnostics/route-bundle-stats.json',
+      turbopackBundleStatsPath: '.next/diagnostics/route-bundle-stats.json',
       bundleData: '{"totalBytes":1,"jsBytes":1,"cssBytes":0,"routes":[{"path":"/","totalBytes":1}]}',
     });
     expect(r.success).toBe(false);

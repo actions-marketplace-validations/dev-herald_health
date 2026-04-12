@@ -30,7 +30,7 @@ export const actionInputsSchema = z.object({
   repositoryFullName: z.string().optional(),
   commitSha: z.string().optional(),
   workflowRunUrl: z.string().optional(),
-  nextjsBundleStatsPath: z
+  turbopackBundleStatsPath: z
     .string()
     .optional()
     .default('')
@@ -42,10 +42,10 @@ export const actionInputsSchema = z.object({
     .transform((s) => s.trim()),
 })
   .refine(
-    (d) => !(d.nextjsBundleStatsPath.length > 0 && d.bundleData.length > 0),
+    (d) => !(d.turbopackBundleStatsPath.length > 0 && d.bundleData.length > 0),
     {
-      message: 'Provide only one of nextjs-bundle-stats-path or bundle-data, not both',
-      path: ['nextjsBundleStatsPath'],
+      message: 'Provide only one of turbopack-bundle-stats-path or bundle-data, not both',
+      path: ['turbopackBundleStatsPath'],
     }
   );
 
