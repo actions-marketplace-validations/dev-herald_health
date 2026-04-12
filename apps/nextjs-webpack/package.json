@@ -1,0 +1,22 @@
+{
+  "name": "@dev-herald/test-nextjs-webpack",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "next build --webpack",
+    "typecheck": "tsc --noEmit",
+    "test:prep": "ANALYZE=true next build --webpack"
+  },
+  "dependencies": {
+    "next": "^16.2.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.3",
+    "@types/node": "^20.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.3.3"
+  }
+}

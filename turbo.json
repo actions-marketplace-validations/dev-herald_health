@@ -5,7 +5,7 @@
       "outputs": [".next/**", "dist/**"]
     },
     "test:prep": {
-      "outputs": [".next/diagnostics/**"]
+      "outputs": [".next/diagnostics/**", ".next/analyze/**"]
     },
     "test": {},
     "typecheck": {}

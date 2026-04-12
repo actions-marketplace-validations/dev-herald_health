@@ -5,16 +5,21 @@ import { buildHealthIngestPayload } from '../../build-payload';
 import { bundleSignalSchema, healthIngestRequestSchema } from '../../schemas/ingest-body';
 import { parseNextjsBundleInput } from '../../signals/bundle';
 
-/** Repo-root-relative analyze output dirs (extend when adding apps with test:prep). */
-export const BUNDLE_FIXTURES = [
+/** Turbopack: `next experimental-analyze --output` → `.next/diagnostics/analyze`. */
+export const BUNDLE_EXPERIMENTAL_ANALYZE_FIXTURES = [
   { name: 'nextjs', analyzeDir: 'apps/nextjs/.next/diagnostics/analyze' },
+] as const;
+
+/** Webpack: `ANALYZE=true next build --webpack` with `@next/bundle-analyzer` → `.next/analyze/*.html`. */
+export const WEBPACK_BUNDLE_ANALYZER_FIXTURES = [
+  { name: 'nextjs-webpack', analyzeDir: 'apps/nextjs-webpack/.next/analyze' },
 ] as const;
 
 function repoRoot(): string {
   return path.join(__dirname, '../../..');
 }
 
-function resolveAnalyzeDir(rel: string): string {
+function resolveDir(rel: string): string {
   return path.join(repoRoot(), rel);
 }
 
@@ -22,11 +27,18 @@ function isFiniteNonNegativeInt(n: unknown): boolean {
   return typeof n === 'number' && Number.isFinite(n) && Number.isInteger(n) && n >= 0;
 }
 
-for (const fixture of BUNDLE_FIXTURES) {
-  const analyzeDir = resolveAnalyzeDir(fixture.analyzeDir);
+function dirHasHtmlReports(dir: string): boolean {
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return false;
+  }
+  return fs.readdirSync(dir).some((f) => f.endsWith('.html'));
+}
+
+for (const fixture of BUNDLE_EXPERIMENTAL_ANALYZE_FIXTURES) {
+  const analyzeDir = resolveDir(fixture.analyzeDir);
   const hasArtifacts = fs.existsSync(path.join(analyzeDir, 'data', 'routes.json'));
 
-  describe.skipIf(!hasArtifacts)(`bundle integration: ${fixture.name}`, () => {
+  describe.skipIf(!hasArtifacts)(`bundle integration: ${fixture.name} (experimental-analyze)`, () => {
     it('parseNextjsBundleInput → bundleSignalSchema → buildHealthIngestPayload', () => {
       const bundle = parseNextjsBundleInput(analyzeDir);
 
@@ -51,6 +63,21 @@ for (const fixture of BUNDLE_FIXTURES) {
   });
 }
 
-// When data/routes.json is missing, the suite above is skipped. Generate artifacts with:
-//   pnpm test:prep
-// from the repo root (or rely on `pnpm test`, which runs test:prep first).
+for (const fixture of WEBPACK_BUNDLE_ANALYZER_FIXTURES) {
+  const analyzeDir = resolveDir(fixture.analyzeDir);
+  const hasArtifacts = dirHasHtmlReports(analyzeDir);
+
+  describe.skipIf(!hasArtifacts)(`bundle integration: ${fixture.name} (@next/bundle-analyzer)`, () => {
+    it('writes HTML reports under .next/analyze (smoke; not parsed as BundleSignal)', () => {
+      const names = fs.readdirSync(analyzeDir).filter((f) => f.endsWith('.html'));
+      expect(names.length).toBeGreaterThan(0);
+      for (const name of names) {
+        const p = path.join(analyzeDir, name);
+        expect(fs.statSync(p).size).toBeGreaterThan(0);
+      }
+    });
+  });
+}
+
+// When artifacts are missing, suites above are skipped. Generate with `pnpm test:prep` from repo root
+// (or `pnpm test`, which runs test:prep first).
